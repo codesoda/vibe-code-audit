@@ -1,0 +1,23 @@
+# Files fetched by install.sh when installing from remote raw URLs.
+SKILL.md
+REPORT_TEMPLATE.md
+scripts/run_index.sh
+scripts/build_read_plan.sh
+scripts/render_report_pdf.sh
+scripts/render_system_map.sh
+references/core/process.md
+references/core/inventory.md
+references/core/pattern-mining.md
+references/core/duplication.md
+references/core/architecture.md
+references/core/risk.md
+references/core/maintainability.md
+references/core/prioritization.md
+references/core/agent-roles.md
+references/core/output-schema.md
+references/core/context-budget.md
+references/claude/subagents-and-model-routing.md
+references/packs/rust-backend.md
+references/packs/react-next.md
+references/packs/node-express.md
+references/packs/rails.md

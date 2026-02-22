@@ -14,6 +14,61 @@ jobs:
       - name: Validate install.sh syntax
         run: sh -n install.sh
 
+      - name: Validate skill script syntax
+        run: |
+          bash -n vibe-code-audit/scripts/run_index.sh
+          bash -n vibe-code-audit/scripts/build_read_plan.sh
+          bash -n vibe-code-audit/scripts/render_system_map.sh
+          bash -n vibe-code-audit/scripts/render_report_pdf.sh
+
+      - name: Run mocked run_index smoke tests
+        run: bash tests/run_index_mock_smoke.sh
+
+      - name: Run optional PDF script smoke check
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          report_path="$tmp_dir/audit_report.md"
+          dot_path="$tmp_dir/system_map.dot"
+          cat > "$dot_path" <<'EOF_DOT'
+digraph system_map {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor="#D6EAF8"];
+  main [label="main"];
+  service [label="service"];
+  storage [label="storage"];
+  main -> service;
+  service -> storage;
+}
+EOF_DOT
+          cat > "$report_path" <<'EOF_MD'
+# 1. Executive Summary
+
+Summary text.
+
+# 2. System Map
+
+```
+ASCII placeholder
+```
+EOF_MD
+
+          map_out="$(bash vibe-code-audit/scripts/render_system_map.sh --report "$report_path")"
+          printf '%s\n' "$map_out"
+          printf '%s\n' "$map_out" | grep -Eq '^SYSTEM_MAP_(PATH|SKIPPED)='
+          if printf '%s\n' "$map_out" | grep -q '^SYSTEM_MAP_PATH='; then
+            test -s "$tmp_dir/system_map.png"
+            grep -q 'system_map.png' "$report_path"
+          fi
+
+          pdf_out="$(bash vibe-code-audit/scripts/render_report_pdf.sh --report "$report_path")"
+          printf '%s\n' "$pdf_out"
+          printf '%s\n' "$pdf_out" | grep -Eq '^PDF_(PATH|SKIPPED)='
+          if printf '%s\n' "$pdf_out" | grep -q '^PDF_PATH='; then
+            test -s "$tmp_dir/audit_report.pdf"
+          fi
+
       - name: Verify local install creates symlinks
         shell: bash
         run: |
@@ -50,3 +105,14 @@ jobs:
           test ! -L "$codex_dir/vibe-code-audit"
           test -f "$codex_dir/vibe-code-audit/SKILL.md"
           test -f "$codex_dir/vibe-code-audit/REPORT_TEMPLATE.md"
+          test -f "$codex_dir/vibe-code-audit/scripts/run_index.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/run_index.sh"
+          test -f "$codex_dir/vibe-code-audit/scripts/build_read_plan.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/build_read_plan.sh"
+          test -f "$codex_dir/vibe-code-audit/scripts/render_system_map.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/render_system_map.sh"
+          test -f "$codex_dir/vibe-code-audit/scripts/render_report_pdf.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/render_report_pdf.sh"
+          test -f "$codex_dir/vibe-code-audit/references/core/process.md"
+          test -f "$codex_dir/vibe-code-audit/references/core/context-budget.md"
+          test -f "$codex_dir/vibe-code-audit/references/claude/subagents-and-model-routing.md"

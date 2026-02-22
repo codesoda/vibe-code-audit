@@ -146,17 +146,54 @@ resolve_source_dir() {
   SOURCE_MODE="remote"
   mkdir -p "$SOURCE_DIR"
 
+  remote_manifest_url="${RAW_BASE}/${SKILL_NAME}/INSTALL_MANIFEST.txt"
   remote_skill_url="${RAW_BASE}/${SKILL_NAME}/SKILL.md"
   remote_report_template_url="${RAW_BASE}/${SKILL_NAME}/REPORT_TEMPLATE.md"
-  info "Fetching skill from ${remote_skill_url}."
+  manifest_tmp="${TMP_DIR}/INSTALL_MANIFEST.txt"
 
-  if ! fetch_to_file "$remote_skill_url" "${SOURCE_DIR}/SKILL.md"; then
-    die "Unable to download SKILL.md (need curl or wget, and network access)."
+  if fetch_to_file "$remote_manifest_url" "$manifest_tmp"; then
+    info "Fetching skill files from ${remote_manifest_url}."
+    while IFS= read -r rel_path || [ -n "$rel_path" ]; do
+      case "$rel_path" in
+        ""|\#*)
+          continue
+          ;;
+      esac
+
+      src_url="${RAW_BASE}/${SKILL_NAME}/${rel_path}"
+      dest_path="${SOURCE_DIR}/${rel_path}"
+      mkdir -p "$(dirname "$dest_path")"
+
+      if ! fetch_to_file "$src_url" "$dest_path"; then
+        if [ "$rel_path" = "SKILL.md" ]; then
+          die "Unable to download required file: ${src_url}"
+        fi
+        warn "Could not download optional file: ${src_url}"
+        continue
+      fi
+
+      case "$rel_path" in
+        scripts/*.sh)
+          chmod +x "$dest_path" 2>/dev/null || true
+          ;;
+      esac
+    done < "$manifest_tmp"
+  else
+    warn "Could not download INSTALL_MANIFEST.txt; falling back to minimal fetch."
   fi
 
-  info "Fetching template from ${remote_report_template_url}."
-  if ! fetch_to_file "$remote_report_template_url" "${SOURCE_DIR}/REPORT_TEMPLATE.md"; then
-    warn "Could not download REPORT_TEMPLATE.md; continuing without it."
+  if [ ! -f "${SOURCE_DIR}/SKILL.md" ]; then
+    info "Fetching skill from ${remote_skill_url}."
+    if ! fetch_to_file "$remote_skill_url" "${SOURCE_DIR}/SKILL.md"; then
+      die "Unable to download SKILL.md (need curl or wget, and network access)."
+    fi
+  fi
+
+  if [ ! -f "${SOURCE_DIR}/REPORT_TEMPLATE.md" ]; then
+    info "Fetching template from ${remote_report_template_url}."
+    if ! fetch_to_file "$remote_report_template_url" "${SOURCE_DIR}/REPORT_TEMPLATE.md"; then
+      warn "Could not download REPORT_TEMPLATE.md; continuing without it."
+    fi
   fi
 }
 
