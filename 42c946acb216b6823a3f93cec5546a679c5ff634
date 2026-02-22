@@ -1,0 +1,12 @@
+---
+cadence_version: 2
+agent: codex
+session_id: 019c848b-992c-7d11-9992-23587f511abe
+repo: /Users/chrisraethke/projects/vibe-code-audit
+commit: 42c946acb216b6823a3f93cec5546a679c5ff634
+confidence: time_window_match
+session_start: 2026-02-22T08:51:07Z
+payload_blob: a63ed3a3ae107a13f338b17fd19d127ccdaf0e6b
+payload_sha256: 2ff049471c7a72f96be6dd4e2382a49452df08820b218e9a04d3aa3046b05fe8
+payload_encoding: zstd+pgp
+---
