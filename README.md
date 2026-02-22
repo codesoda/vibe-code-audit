@@ -26,6 +26,8 @@ The skill is intentionally constrained to:
 - `Read(<target-repo-files>)` for audit evidence
 
 Avoid unrelated command families during the audit flow unless explicitly requested by the user.
+Avoid `Read` on generated graph/image artifacts (`*.dot`, `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.pdf`); extract with shell tools instead.
+Use portable search commands (`rg`, `grep -E`, `grep -oE`) rather than `grep -P`.
 
 ## Audit output location
 
@@ -59,11 +61,18 @@ Modes:
 - `standard` (top-k 200)
 - `deep` (top-k 350)
 
+Stack marker detection is recursive (not only repo root), so nested Rust/TS workspaces are detected for indexing masks and graph generation.
+
 `run_index.sh` auto-detects `llmcc` and `agentroot` CLI variants (legacy vs current syntax), so you should not need to run manual `--help` probes in normal audit flow.
 
 `run_index.sh` auto-runs bounded read-plan generation, producing:
 - `audit_index/derived/read_plan.tsv`
 - `audit_index/derived/read_plan.md`
+
+`run_index.sh` also auto-runs deterministic derived-artifact bootstrap, producing:
+- `audit_index/derived/catalog.json`
+- `audit_index/derived/hotspots.json`
+- `audit_index/derived/dup_clusters.md`
 
 ## Reliability / non-failure behavior
 
@@ -89,6 +98,36 @@ VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1 \
 bash vibe-code-audit/scripts/run_index.sh --repo /path/to/repo --mode standard
 ```
 
+Auto-embed behavior:
+
+- `run_index.sh` calls `vibe-code-audit/scripts/run_agentroot_embed.sh`.
+- It first tries `agentroot embed` directly.
+- If `agentroot` reports HTTP embedding connection failures, it:
+  - retries against an already-running service on `127.0.0.1:8000`, or
+  - optionally boots `llama-server` locally (when available) with larger ctx/batch defaults.
+- If embedding still fails (including known `agentroot` UTF-8 chunk panic cases), indexing continues in BM25 mode and does not fail the audit run.
+- Manifest now records:
+  - `agentroot_embed_attempted`
+  - `agentroot_embed_ok`
+  - `agentroot_embed_backend`
+
+Useful embed environment toggles:
+
+```sh
+VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1
+VIBE_CODE_AUDIT_EMBED_START_LOCAL=1
+VIBE_CODE_AUDIT_EMBED_MODEL_PATH="$HOME/.local/share/agentroot/nomic-embed.gguf"
+VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL=0
+```
+
+Manual embedding retry (against an existing audit index):
+
+```sh
+bash vibe-code-audit/scripts/run_agentroot_embed.sh \
+  --db /path/to/output/audit_index/agentroot/index.sqlite \
+  --output-dir /path/to/output/audit_index/agentroot
+```
+
 CI now runs `tests/run_index_mock_smoke.sh`, which exercises compatibility/fallback paths using mocked `llmcc` and `agentroot` binaries.
 
 ## Optional PDF export
@@ -97,7 +136,8 @@ After `audit_report.md` is written, you can generate a PDF copy:
 
 ```sh
 bash vibe-code-audit/scripts/render_report_pdf.sh \
-  --report /path/to/output/audit_report.md
+  --report /path/to/output/audit_report.md \
+  --map-mode crate
 ```
 
 Behavior:
@@ -105,6 +145,8 @@ Behavior:
 - If tools are available, it writes `audit_report.pdf` and prints `PDF_PATH=...`.
 - If tools are missing, it exits successfully and prints `PDF_SKIPPED=1` with a reason.
 - It also tries to render `system_map.png` first (non-fatal) using `render_system_map.sh`.
+- If PDF render fails due oversized diagram content, it retries without embedding the system map image.
+- On fallback success, it also prints `PDF_NOTE=rendered_without_system_map`.
 
 Required tools for PDF generation:
 
@@ -115,6 +157,19 @@ Optional tools for system map diagram rendering:
 
 - `dot` (Graphviz)
 - a dot source file (preferred: `<output_dir>/system_map.dot`; fallback: llmcc depth graph artifacts)
+
+Optional diagram control:
+
+```sh
+bash vibe-code-audit/scripts/render_system_map.sh \
+  --report /path/to/output/audit_report.md \
+  --mode crate
+```
+
+Modes:
+- `auto` (default): prefers smaller crate/module graphs first
+- `crate`: strongly prefers crate-level readability
+- `full`: prefers dense full graphs
 
 ## Claude subagents + models
 

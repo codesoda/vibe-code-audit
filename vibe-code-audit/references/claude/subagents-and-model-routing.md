@@ -15,7 +15,7 @@ Use this phase-to-agent/model mapping:
 1. Phase 0-1 (preflight, indexing, read-plan build)
    - Runner: main thread
    - Model: `sonnet`
-   - Action: run deterministic scripts only
+   - Action: run deterministic scripts only (`run_index.sh` handles embed helper flow when enabled)
 2. Discovery and codebase exploration
    - Runner: built-in Explore subagent (read-only)
    - Model: `haiku` (built-in Explore is optimized for this)
@@ -104,3 +104,6 @@ Evaluate only top-risk candidates. Require concrete evidence. Resolve severity a
 2. Limit each subagent run to a bounded objective and short output.
 3. Feed subagents artifacts and read-plan slices, not full-repo raw content.
 4. Merge subagent results in main thread and enforce final confidence thresholds.
+5. Use portable search commands (`rg`, `grep -E`, `grep -oE`); do not use `grep -P`.
+6. Do not `Read` generated graph/image/binary artifacts (`*.dot`, `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.pdf`).
+7. If vectors are missing, prefer rerunning with `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1` before manual embed command sprawl.

@@ -2,6 +2,8 @@
 SKILL.md
 REPORT_TEMPLATE.md
 scripts/run_index.sh
+scripts/run_agentroot_embed.sh
+scripts/build_derived_artifacts.sh
 scripts/build_read_plan.sh
 scripts/render_report_pdf.sh
 scripts/render_system_map.sh

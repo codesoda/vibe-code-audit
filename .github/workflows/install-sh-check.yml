@@ -17,6 +17,8 @@ jobs:
       - name: Validate skill script syntax
         run: |
           bash -n vibe-code-audit/scripts/run_index.sh
+          bash -n vibe-code-audit/scripts/run_agentroot_embed.sh
+          bash -n vibe-code-audit/scripts/build_derived_artifacts.sh
           bash -n vibe-code-audit/scripts/build_read_plan.sh
           bash -n vibe-code-audit/scripts/render_system_map.sh
           bash -n vibe-code-audit/scripts/render_report_pdf.sh
@@ -62,7 +64,7 @@ EOF_MD
             grep -q 'system_map.png' "$report_path"
           fi
 
-          pdf_out="$(bash vibe-code-audit/scripts/render_report_pdf.sh --report "$report_path")"
+          pdf_out="$(bash vibe-code-audit/scripts/render_report_pdf.sh --report "$report_path" --map-mode crate)"
           printf '%s\n' "$pdf_out"
           printf '%s\n' "$pdf_out" | grep -Eq '^PDF_(PATH|SKIPPED)='
           if printf '%s\n' "$pdf_out" | grep -q '^PDF_PATH='; then
@@ -107,8 +109,12 @@ EOF_MD
           test -f "$codex_dir/vibe-code-audit/REPORT_TEMPLATE.md"
           test -f "$codex_dir/vibe-code-audit/scripts/run_index.sh"
           test -x "$codex_dir/vibe-code-audit/scripts/run_index.sh"
+          test -f "$codex_dir/vibe-code-audit/scripts/run_agentroot_embed.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/run_agentroot_embed.sh"
           test -f "$codex_dir/vibe-code-audit/scripts/build_read_plan.sh"
           test -x "$codex_dir/vibe-code-audit/scripts/build_read_plan.sh"
+          test -f "$codex_dir/vibe-code-audit/scripts/build_derived_artifacts.sh"
+          test -x "$codex_dir/vibe-code-audit/scripts/build_derived_artifacts.sh"
           test -f "$codex_dir/vibe-code-audit/scripts/render_system_map.sh"
           test -x "$codex_dir/vibe-code-audit/scripts/render_system_map.sh"
           test -f "$codex_dir/vibe-code-audit/scripts/render_report_pdf.sh"

@@ -21,6 +21,9 @@ Options:
 
 This script writes:
   <output_dir>/audit_index/
+  <output_dir>/audit_index/derived/catalog.json
+  <output_dir>/audit_index/derived/hotspots.json
+  <output_dir>/audit_index/derived/dup_clusters.md
 
 Machine-readable output:
   OUTPUT_DIR=<resolved absolute output dir>
@@ -28,6 +31,10 @@ Machine-readable output:
 Environment:
   VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1
     Attempt `agentroot embed` automatically when embeddings are missing.
+  VIBE_CODE_AUDIT_EMBED_START_LOCAL=1
+    When auto-embed is enabled, allow local llama-server bootstrapping.
+  VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL=1
+    Allow helper script to download the default nomic GGUF model when missing.
 USAGE
 }
 
@@ -57,6 +64,13 @@ json_int_from_file() {
   else
     printf '%s\n' "$value"
   fi
+}
+
+kv_from_file() {
+  file="$1"
+  key="$2"
+  value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
+  printf '%s\n' "$value"
 }
 
 REPO_PATH=""
@@ -103,6 +117,8 @@ done
 
 [ -n "$REPO_PATH" ] || die "--repo is required"
 [ -d "$REPO_PATH" ] || die "repo path not found: $REPO_PATH"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [ -z "$TOP_K" ]; then
   case "$MODE" in
@@ -226,13 +242,33 @@ run_llmcc_graph() {
 
 pushd "$REPO_PATH_ABS" >/dev/null
 
+repo_has_file_named() {
+  name="$1"
+  if find . \
+    \( -path './.git' -o -path './.git/*' \
+       -o -path './target' -o -path './target/*' \
+       -o -path './node_modules' -o -path './node_modules/*' \
+       -o -path './dist' -o -path './dist/*' \
+       -o -path './build' -o -path './build/*' \
+       -o -path './.next' -o -path './.next/*' \
+       -o -path './coverage' -o -path './coverage/*' \) -prune \
+    -o -type f -name "$name" -print -quit | grep -q .; then
+    return 0
+  fi
+  return 1
+}
+
 HAS_RUST=0
 HAS_TS=0
-if [ -f Cargo.toml ]; then
+HAS_NODE=0
+if [ -f Cargo.toml ] || repo_has_file_named "Cargo.toml"; then
   HAS_RUST=1
 fi
-if [ -f tsconfig.json ]; then
+if [ -f tsconfig.json ] || repo_has_file_named "tsconfig.json"; then
   HAS_TS=1
+fi
+if [ -f package.json ] || repo_has_file_named "package.json"; then
+  HAS_NODE=1
 fi
 
 if [ "$HAS_RUST" -eq 1 ]; then
@@ -294,6 +330,48 @@ run_agentroot_vsearch_check() {
   return 1
 }
 
+attempt_agentroot_embed() {
+  if [ "${VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED:-0}" != "1" ]; then
+    return 0
+  fi
+  if [ "$AGENTROOT_EMBEDDED_COUNT" -gt 0 ]; then
+    return 0
+  fi
+
+  EMBED_ATTEMPTED=1
+  log "Attempting agentroot embed (VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1)"
+
+  EMBED_HELPER_SCRIPT="$SCRIPT_DIR/run_agentroot_embed.sh"
+  EMBED_RUNNER_OUT="$AGENTROOT_OUT_DIR/embed_runner.txt"
+
+  if [ -x "$EMBED_HELPER_SCRIPT" ]; then
+    if bash "$EMBED_HELPER_SCRIPT" --db "$AGENTROOT_DB_PATH" --output-dir "$AGENTROOT_OUT_DIR" >"$EMBED_RUNNER_OUT" 2>&1; then
+      EMBED_OK=1
+    else
+      warn "agentroot embed helper failed (see $EMBED_RUNNER_OUT)"
+    fi
+    EMBED_BACKEND_CANDIDATE="$(kv_from_file "$EMBED_RUNNER_OUT" "EMBED_BACKEND")"
+    if [ -n "$EMBED_BACKEND_CANDIDATE" ]; then
+      EMBED_BACKEND="$EMBED_BACKEND_CANDIDATE"
+    fi
+  else
+    warn "embed helper script is missing: $EMBED_HELPER_SCRIPT"
+    if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot embed > "$AGENTROOT_OUT_DIR/embed.txt" 2>&1; then
+      EMBED_OK=1
+      EMBED_BACKEND="direct"
+    else
+      warn "agentroot embed failed (see $AGENTROOT_OUT_DIR/embed.txt)"
+    fi
+  fi
+
+  if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
+    AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
+    AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
+  else
+    warn "agentroot status check failed after embed attempt (see $AGENTROOT_OUT_DIR/status.json)"
+  fi
+}
+
 # agentroot compatibility: older builds expose `index`; newer builds use
 # collection add + update.
 if agentroot index --help >/dev/null 2>&1; then
@@ -310,6 +388,9 @@ AGENTROOT_EMBEDDED_COUNT=0
 RETRIEVAL_MODE="unknown"
 QUERY_OK=0
 VSEARCH_OK=0
+EMBED_ATTEMPTED=0
+EMBED_OK=0
+EMBED_BACKEND="none"
 
 if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
   log "Running agentroot index"
@@ -329,6 +410,8 @@ if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
     else
       warn "agentroot status check failed (see $AGENTROOT_OUT_DIR/status.json)"
     fi
+
+    attempt_agentroot_embed
 
     log "Running retrieval validation"
     if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
@@ -356,7 +439,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   if [ "$HAS_RUST" -eq 1 ]; then
     MASKS+=( '**/*.rs' '**/*.toml' )
   fi
-  if [ "$HAS_TS" -eq 1 ] || [ -f package.json ]; then
+  if [ "$HAS_TS" -eq 1 ] || [ "$HAS_NODE" -eq 1 ]; then
     MASKS+=( '**/*.ts' '**/*.tsx' '**/*.js' '**/*.jsx' '**/*.mjs' '**/*.cjs' '**/*.json' )
   fi
   if [ "${#MASKS[@]}" -eq 0 ]; then
@@ -412,17 +495,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
 
   [ "$AGENTROOT_DOC_COUNT" -gt 0 ] || die "agentroot indexed zero documents after fallback"
 
-  if [ "${VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED:-0}" = "1" ] && [ "$AGENTROOT_EMBEDDED_COUNT" -eq 0 ]; then
-    log "Attempting agentroot embed (VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1)"
-    if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot embed > "$AGENTROOT_OUT_DIR/embed.txt" 2>&1; then
-      if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
-        AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
-        AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
-      fi
-    else
-      warn "agentroot embed failed (see $AGENTROOT_OUT_DIR/embed.txt)"
-    fi
-  fi
+  attempt_agentroot_embed
 
   log "Running retrieval validation"
   if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
@@ -494,6 +567,9 @@ cat > "$MANIFEST_PATH" <<MANIFEST
   "agentroot_collections": $AGENTROOT_COLLECTIONS_JSON,
   "agentroot_document_count": $AGENTROOT_DOC_COUNT,
   "agentroot_embedded_count": $AGENTROOT_EMBEDDED_COUNT,
+  "agentroot_embed_attempted": $EMBED_ATTEMPTED,
+  "agentroot_embed_ok": $EMBED_OK,
+  "agentroot_embed_backend": "$(json_escape "$EMBED_BACKEND")",
   "retrieval_mode": "$(json_escape "$RETRIEVAL_MODE")",
   "retrieval_query_ok": $QUERY_OK,
   "retrieval_vsearch_ok": $VSEARCH_OK,
@@ -507,8 +583,18 @@ MANIFEST
 
 log "Wrote $MANIFEST_PATH"
 
+DERIVED_SCRIPT="$SCRIPT_DIR/build_derived_artifacts.sh"
+if [ -x "$DERIVED_SCRIPT" ]; then
+  log "Building derived artifacts"
+  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE" --top-k "$TOP_K"
+  test -s "$DERIVED_OUT_DIR/catalog.json" || die "catalog.json was not generated"
+  test -s "$DERIVED_OUT_DIR/hotspots.json" || die "hotspots.json was not generated"
+  test -s "$DERIVED_OUT_DIR/dup_clusters.md" || die "dup_clusters.md was not generated"
+else
+  warn "Derived artifacts script not found or not executable: $DERIVED_SCRIPT"
+fi
+
 if [ "$SKIP_READ_PLAN" -eq 0 ]; then
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   READ_PLAN_SCRIPT="$SCRIPT_DIR/build_read_plan.sh"
   if [ -x "$READ_PLAN_SCRIPT" ]; then
     log "Running read plan builder"

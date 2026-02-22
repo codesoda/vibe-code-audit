@@ -273,6 +273,7 @@ run_case() {
   agentroot_index_fail="$6"
   expected_llmcc_mode="$7"
   expected_agentroot_mode="$8"
+  repo_layout="${9:-root-rust}"
 
   (
     set -euo pipefail
@@ -282,18 +283,33 @@ run_case() {
     output_dir="$work_dir/output"
     bin_dir="$work_dir/bin"
 
-    mkdir -p "$repo_dir/src"
-    cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
+    if [ "$repo_layout" = "nested-rust" ]; then
+      mkdir -p "$repo_dir/backend/src"
+      cat > "$repo_dir/backend/Cargo.toml" <<'EOF_CARGO'
+[package]
+name = "mock-nested-rust"
+version = "0.1.0"
+edition = "2021"
+EOF_CARGO
+      cat > "$repo_dir/backend/src/main.rs" <<'EOF_RS'
+fn main() {
+    println!("nested");
+}
+EOF_RS
+    else
+      mkdir -p "$repo_dir/src"
+      cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
 [package]
 name = "mock-repo"
 version = "0.1.0"
 edition = "2021"
 EOF_CARGO
-    cat > "$repo_dir/src/main.rs" <<'EOF_RS'
+      cat > "$repo_dir/src/main.rs" <<'EOF_RS'
 fn main() {
     println!("hello");
 }
 EOF_RS
+    fi
 
     write_mock_bins "$bin_dir"
 
@@ -306,6 +322,7 @@ EOF_RS
     export MOCK_AGENTROOT_INDEX_FAIL="$agentroot_index_fail"
     export MOCK_AGENTROOT_DOC_COUNT="23"
     export MOCK_AGENTROOT_EMBEDDED_COUNT="23"
+    unset VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED
 
     run_output="$(
       bash "$RUN_INDEX_SCRIPT" \
@@ -319,6 +336,9 @@ EOF_RS
 
     manifest="$resolved_output/audit_index/manifest.json"
     assert_nonempty_file "$manifest"
+    assert_nonempty_file "$resolved_output/audit_index/derived/catalog.json"
+    assert_nonempty_file "$resolved_output/audit_index/derived/hotspots.json"
+    assert_nonempty_file "$resolved_output/audit_index/derived/dup_clusters.md"
     [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
       fail "case $case_name: expected read_plan.tsv to exist"
     assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
@@ -339,6 +359,16 @@ EOF_RS
     [ "$query_ok" -eq 1 ] || [ "$vsearch_ok" -eq 1 ] || \
       fail "case $case_name: expected at least one retrieval check to pass"
 
+    embed_attempted="$(json_int "$manifest" "agentroot_embed_attempted")"
+    embed_ok="$(json_int "$manifest" "agentroot_embed_ok")"
+    embed_backend="$(json_string "$manifest" "agentroot_embed_backend")"
+    [ "$embed_attempted" -eq 0 ] || \
+      fail "case $case_name: expected agentroot_embed_attempted=0"
+    [ "$embed_ok" -eq 0 ] || \
+      fail "case $case_name: expected agentroot_embed_ok=0"
+    [ "$embed_backend" = "none" ] || \
+      fail "case $case_name: expected agentroot_embed_backend=none"
+
     printf '[run_index_mock_smoke] PASS: %s\n' "$case_name"
     rm -rf "$work_dir"
   )
@@ -355,5 +385,10 @@ run_case "legacy-llmcc-with-index-agentroot" \
 run_case "agentroot-index-fallback-to-collection" \
   "flag" "flag" "index" "1" "1" \
   "flag-depth" "collection-update"
+
+run_case "nested-rust-workspace-marker" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "nested-rust"
 
 printf '[run_index_mock_smoke] All smoke cases passed.\n'

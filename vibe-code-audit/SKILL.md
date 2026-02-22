@@ -3,7 +3,9 @@ name: vibe-code-audit
 description: Catalogue-first repo audit for vibe-coded systems. Use when Codex must run llmcc and agentroot, discover semantic duplication and architecture drift, and produce evidence-based refactor bundles with high-confidence findings. Supports progressive disclosure via references/core and stack-specific references/packs.
 allowed-tools:
   - Bash(*run_index.sh*)
+  - Bash(*build_derived_artifacts.sh*)
   - Bash(*build_read_plan.sh*)
+  - Bash(*run_agentroot_embed.sh*)
   - Bash(*render_system_map.sh*)
   - Bash(*render_report_pdf.sh*)
   - Bash(llmcc *)
@@ -83,6 +85,8 @@ Prevent context-window failures during large-repo audits:
 5. Avoid parallel bulk file reads across the whole repo.
 6. Prefer artifact-driven analysis (`manifest`, `catalog`, `hotspots`, `dup_clusters`) over exhaustive raw-file ingestion.
 7. Do not open raw `audit_index/llmcc/**/*.dot` files in normal flow; use `derived/hotspots.json` and catalog artifacts instead.
+8. Never `Read` binary or generated graph/image files (`*.dot`, `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.pdf`).
+9. If a required `Read` fails, retry that file sequentially; do not batch sibling `Read` calls until the missing-path issue is fixed.
 
 ## Claude Execution Mode
 
@@ -101,13 +105,15 @@ When running this skill via Claude Code:
 Use only the following tool classes for this skill unless the user explicitly expands scope:
 
 1. `Bash(<skill_dir>/scripts/run_index.sh ...)` for deterministic preflight + indexing.
-2. `Bash(<skill_dir>/scripts/build_read_plan.sh ...)` for bounded evidence slice planning.
-3. `Bash(<skill_dir>/scripts/render_report_pdf.sh ...)` for optional report PDF generation.
-4. `Bash(<skill_dir>/scripts/render_system_map.sh ...)` for optional system map rendering.
-5. `Bash(llmcc ...)` for structural graph generation and PageRank hotspot extraction.
-6. `Bash(agentroot ...)` for hybrid indexing, lexical query, and semantic search.
-7. `Read(vibe-code-audit/**)` for reading skill instructions, references, and templates.
-8. `Read(<target-repo-files>)` for read-only audit evidence collection.
+2. `Bash(<skill_dir>/scripts/build_derived_artifacts.sh ...)` for deterministic `catalog/hotspots/dup_clusters` bootstrap.
+3. `Bash(<skill_dir>/scripts/build_read_plan.sh ...)` for bounded evidence slice planning.
+4. `Bash(<skill_dir>/scripts/run_agentroot_embed.sh ...)` only for embedding troubleshooting or manual embed reruns.
+5. `Bash(<skill_dir>/scripts/render_report_pdf.sh ...)` for optional report PDF generation.
+6. `Bash(<skill_dir>/scripts/render_system_map.sh ...)` for optional system map rendering.
+7. `Bash(llmcc ...)` for structural graph generation and PageRank hotspot extraction.
+8. `Bash(agentroot ...)` for hybrid indexing, lexical query, and semantic search.
+9. `Read(vibe-code-audit/**)` for reading skill instructions, references, and templates.
+10. `Read(<target-repo-files>)` for read-only audit evidence collection.
 
 Do not run unrelated command families during the audit flow.
 
@@ -136,27 +142,36 @@ Use deterministic command execution for indexing:
    - `<skill_dir>/scripts/run_index.sh --repo <repo_path> --mode <budget_mode>`
 3. If custom output is needed, pass `--output <output_dir>` to the same command.
 4. `run_index.sh` auto-runs read-plan generation unless `--skip-read-plan` is used.
-5. Do not run separate preflight commands (`llmcc --version`, `agentroot --version`) outside scripts in normal flow.
-6. Use direct `llmcc`/`agentroot` commands only if script execution is unavailable.
-7. Do not run exploratory `llmcc --help` or `agentroot --help` during normal audit flow.
-8. Use `--help` only as fallback when an expected command fails with an unknown command/flag error.
-9. Run all index commands from the resolved `repo_path`.
-10. Verify expected artifact files/directories after each indexing stage.
-11. Read `<output_dir>/audit_index/manifest.json` before analysis and enforce:
+5. `run_index.sh` auto-runs derived artifact bootstrap (`catalog.json`, `hotspots.json`, `dup_clusters.md`).
+6. Do not run separate preflight commands (`llmcc --version`, `agentroot --version`) outside scripts in normal flow.
+7. Use direct `llmcc`/`agentroot` commands only if script execution is unavailable.
+8. Do not run exploratory `llmcc --help` or `agentroot --help` during normal audit flow.
+9. Use `--help` only as fallback when an expected command fails with an unknown command/flag error.
+10. Run all index commands from the resolved `repo_path`.
+11. Verify expected artifact files/directories after each indexing stage.
+12. Read `<output_dir>/audit_index/manifest.json` before analysis and enforce:
    - `agentroot_document_count > 0`
    - `retrieval_query_ok == 1` or `retrieval_vsearch_ok == 1`
-12. If `retrieval_mode` is `bm25-only`, continue in degraded mode (do not abort), but rely more on direct file evidence and explicit `rg` corroboration.
-13. Avoid `Read` on large generated artifacts (`*.dot`, huge logs) unless recovery mode requires it.
-14. `run_index.sh` already includes CLI-compatibility fallbacks; if it fails, rerun once and inspect its stderr instead of manually re-implementing indexing with many ad-hoc commands.
-15. After writing `<output_dir>/audit_report.md`, run:
-   - `<skill_dir>/scripts/render_report_pdf.sh --report <output_dir>/audit_report.md`
-16. `render_report_pdf.sh` attempts `render_system_map.sh` automatically first (non-fatal).
-17. Treat system map and PDF export as optional:
+13. If `retrieval_mode` is `bm25-only`, continue in degraded mode (do not abort), but rely more on direct file evidence and explicit `rg` corroboration.
+14. If `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1`, let `run_index.sh` drive embedding via `run_agentroot_embed.sh`; avoid manual ad-hoc embed orchestration in normal flow.
+15. For embed troubleshooting, read manifest fields:
+   - `agentroot_embed_attempted`
+   - `agentroot_embed_ok`
+   - `agentroot_embed_backend`
+16. Never use `grep -P` / `grep -oP`; use `rg` or portable `grep -E`/`grep -oE`.
+17. Avoid `Read` on large generated artifacts (`*.dot`, huge logs, image files) unless recovery mode requires it.
+18. `run_index.sh` already includes CLI-compatibility fallbacks; if it fails, rerun once and inspect its stderr instead of manually re-implementing indexing with many ad-hoc commands.
+19. Do not compute hotspot LOC with overlapping glob patterns (for example `src/*.rs` + `src/**/*.rs`) because it double-counts files.
+20. After writing `<output_dir>/audit_report.md`, run:
+   - `<skill_dir>/scripts/render_report_pdf.sh --report <output_dir>/audit_report.md --map-mode crate`
+21. `render_report_pdf.sh` attempts `render_system_map.sh` automatically first (non-fatal).
+22. Treat system map and PDF export as optional:
    - if script output contains `SYSTEM_MAP_PATH=...`, reference the generated image
    - if script output contains `SYSTEM_MAP_SKIPPED=1`, continue without failing the audit
-18. For PDF:
+23. For PDF:
    - if script output contains `PDF_PATH=...`, reference the generated PDF
    - if script output contains `PDF_SKIPPED=1`, continue without failing the audit
+   - if script output contains `PDF_NOTE=rendered_without_system_map`, mention PDF fallback behavior
 
 ## Required Outputs
 

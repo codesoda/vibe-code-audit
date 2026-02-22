@@ -8,7 +8,7 @@ usage() {
 Optionally render a system map image for an audit report when Graphviz is available.
 
 Usage:
-  render_system_map.sh --report <audit_report.md> [--dot <system_map.dot>] [--image <system_map.png>] [--no-edit]
+  render_system_map.sh --report <audit_report.md> [--dot <system_map.dot>] [--image <system_map.png>] [--mode <auto|crate|full>] [--no-edit]
 
 Behavior:
   - If rendering succeeds, this script exits 0 and prints:
@@ -32,6 +32,7 @@ warn() {
 REPORT_PATH=""
 DOT_PATH=""
 IMAGE_PATH=""
+MAP_MODE="auto"
 NO_EDIT=0
 
 while [ $# -gt 0 ]; do
@@ -63,6 +64,15 @@ while [ $# -gt 0 ]; do
       IMAGE_PATH="$2"
       shift 2
       ;;
+    --mode)
+      [ $# -ge 2 ] || {
+        warn "--mode requires a value"
+        usage
+        exit 1
+      }
+      MAP_MODE="$2"
+      shift 2
+      ;;
     --no-edit)
       NO_EDIT=1
       shift
@@ -78,6 +88,15 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+case "$MAP_MODE" in
+  auto|crate|full) ;;
+  *)
+    warn "Invalid --mode value: $MAP_MODE (expected auto|crate|full)"
+    usage
+    exit 1
+    ;;
+esac
 
 if [ -z "$REPORT_PATH" ]; then
   warn "--report is required"
@@ -109,22 +128,56 @@ if [ -n "$DOT_PATH" ]; then
   esac
 fi
 
-if [ -z "$DOT_PATH" ]; then
-  candidates=(
-    "$REPORT_DIR/system_map.dot"
-    "$REPORT_DIR/audit_index/derived/system_map.dot"
-    "$REPORT_DIR/audit_index/llmcc/rust/depth3_topk.dot"
-    "$REPORT_DIR/audit_index/llmcc/ts/depth3_topk.dot"
-    "$REPORT_DIR/audit_index/llmcc/rust/depth3.dot"
-    "$REPORT_DIR/audit_index/llmcc/ts/depth3.dot"
-  )
+dot_candidates_by_mode() {
+  mode="$1"
+  case "$mode" in
+    crate)
+      cat <<EOF_CANDIDATES
+$REPORT_DIR/system_map.dot
+$REPORT_DIR/audit_index/derived/system_map.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth1.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth2.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth2.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth3.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth3.dot
+EOF_CANDIDATES
+      ;;
+    full)
+      cat <<EOF_CANDIDATES
+$REPORT_DIR/system_map.dot
+$REPORT_DIR/audit_index/derived/system_map.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth3_topk.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth3_topk.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth3.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth3.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth2.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth2.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth1.dot
+EOF_CANDIDATES
+      ;;
+    *)
+      cat <<EOF_CANDIDATES
+$REPORT_DIR/system_map.dot
+$REPORT_DIR/audit_index/derived/system_map.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth1.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth2.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth2.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth3.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth3.dot
+$REPORT_DIR/audit_index/llmcc/rust/depth3_topk.dot
+$REPORT_DIR/audit_index/llmcc/ts/depth3_topk.dot
+EOF_CANDIDATES
+      ;;
+  esac
+}
 
-  for candidate in "${candidates[@]}"; do
+if [ -z "$DOT_PATH" ]; then
+  while IFS= read -r candidate; do
     if [ -s "$candidate" ]; then
       DOT_PATH="$candidate"
       break
     fi
-  done
+  done < <(dot_candidates_by_mode "$MAP_MODE")
 fi
 
 if [ -z "$DOT_PATH" ] || [ ! -s "$DOT_PATH" ]; then
@@ -148,7 +201,18 @@ fi
 
 mkdir -p "$(dirname "$IMAGE_PATH")"
 
-if ! dot -Tpng -Gdpi=200 "$DOT_PATH_ABS" -o "$IMAGE_PATH"; then
+DOT_RENDER_ARGS=(-Tpng -Gdpi=200)
+case "$DOT_PATH_ABS" in
+  */llmcc/*/depth3_topk.dot|*/llmcc/*/depth3.dot)
+    # Prevent oversized images that often break PDF rendering.
+    DOT_RENDER_ARGS+=(-Gsize=9,12! -Gratio=compress)
+    ;;
+esac
+if [ "$MAP_MODE" = "full" ]; then
+  DOT_RENDER_ARGS+=(-Gsize=9,12! -Gratio=compress)
+fi
+
+if ! dot "${DOT_RENDER_ARGS[@]}" "$DOT_PATH_ABS" -o "$IMAGE_PATH"; then
   warn "dot render failed for $DOT_PATH_ABS"
   echo "SYSTEM_MAP_SKIPPED=1"
   echo "SYSTEM_MAP_REASON=dot_render_failed"
@@ -238,7 +302,18 @@ if [ "$NO_EDIT" -eq 0 ] && ! grep -Fq "]($IMAGE_REF)" "$REPORT_PATH_ABS"; then
 fi
 
 log "Rendered system map image: $IMAGE_PATH"
+DOT_SOURCE_KIND="custom-dot"
+case "$DOT_PATH_ABS" in
+  */llmcc/*/depth1.dot) DOT_SOURCE_KIND="llmcc-depth1" ;;
+  */llmcc/*/depth2.dot) DOT_SOURCE_KIND="llmcc-depth2" ;;
+  */llmcc/*/depth3.dot) DOT_SOURCE_KIND="llmcc-depth3" ;;
+  */llmcc/*/depth3_topk.dot) DOT_SOURCE_KIND="llmcc-depth3-topk" ;;
+  */audit_index/derived/system_map.dot) DOT_SOURCE_KIND="derived-system-map" ;;
+  */system_map.dot) DOT_SOURCE_KIND="report-system-map" ;;
+esac
 echo "SYSTEM_MAP_PATH=$IMAGE_PATH"
 echo "SYSTEM_MAP_DOT=$DOT_PATH_ABS"
+echo "SYSTEM_MAP_MODE=$MAP_MODE"
+echo "SYSTEM_MAP_SOURCE_KIND=$DOT_SOURCE_KIND"
 echo "SYSTEM_MAP_REPORT_UPDATED=$REPORT_UPDATED"
 exit 0

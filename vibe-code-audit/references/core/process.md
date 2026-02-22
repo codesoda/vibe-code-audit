@@ -58,9 +58,13 @@ RETRIEVAL_MODE="$(sed -n 's/.*"retrieval_mode"[[:space:]]*:[[:space:]]*"\([^"]*\
 
 [ "${DOC_COUNT:-0}" -gt 0 ] || { echo "agentroot document_count is zero"; exit 1; }
 [ "${QUERY_OK:-0}" -eq 1 ] || [ "${VSEARCH_OK:-0}" -eq 1 ] || { echo "both retrieval checks failed"; exit 1; }
+[ -s "$AUDIT_INDEX_DIR/derived/catalog.json" ] || { echo "catalog.json missing"; exit 1; }
+[ -s "$AUDIT_INDEX_DIR/derived/hotspots.json" ] || { echo "hotspots.json missing"; exit 1; }
+[ -s "$AUDIT_INDEX_DIR/derived/dup_clusters.md" ] || { echo "dup_clusters.md missing"; exit 1; }
 ```
 
 If script path is unavailable, execute the manual sequence below.
+If `build_derived_artifacts.sh` is unavailable, still create `catalog.json`, `hotspots.json`, and `dup_clusters.md` manually before analysis.
 If `build_read_plan.sh` is unavailable, still create `read_plan.tsv` and `read_plan.md` manually with bounded limits from `references/core/context-budget.md`.
 
 ### Preflight
@@ -73,6 +77,9 @@ Command policy:
 4. Do not run standalone timestamp commands for output path generation.
 5. Run from repo root (`cd "$REPO_PATH"`).
 6. If `run_index.sh` fails, rerun it once after checking stderr; avoid manual command sprawl unless scripted path is unavailable.
+7. Use portable search syntax only (`rg`, `grep -E`, `grep -oE`); do not use `grep -P`.
+8. Do not `Read` generated graph/image artifacts (`*.dot`, `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.pdf`).
+9. If a required file read fails, retry sequentially instead of launching sibling `Read` calls in parallel.
 
 Run:
 
@@ -119,14 +126,17 @@ Write `$AUDIT_INDEX_DIR/manifest.json` with:
 10. `agentroot_collections`
 11. `agentroot_document_count`
 12. `agentroot_embedded_count`
-13. `retrieval_mode`
-14. `retrieval_query_ok`
-15. `retrieval_vsearch_ok`
-16. `exclude_patterns`
-17. `modes_enabled`
-18. `pagerank_top_k`
-19. `budget_mode`
-20. `command_runner`
+13. `agentroot_embed_attempted`
+14. `agentroot_embed_ok`
+15. `agentroot_embed_backend`
+16. `retrieval_mode`
+17. `retrieval_query_ok`
+18. `retrieval_vsearch_ok`
+19. `exclude_patterns`
+20. `modes_enabled`
+21. `pagerank_top_k`
+22. `budget_mode`
+23. `command_runner`
 
 ### Structural Graphs
 
@@ -225,6 +235,12 @@ test -s "$AUDIT_INDEX_DIR/agentroot/vsearch_check.txt"
 
 If output indicates missing vectors, continue in BM25-only mode and mark `retrieval_mode` accordingly in `manifest.json`.
 
+If `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1` and `agentroot_embedded_count == 0`:
+
+1. Prefer `run_index.sh` auto flow (it invokes `run_agentroot_embed.sh`).
+2. Do not hand-roll ad-hoc embed orchestration unless troubleshooting.
+3. If embed still fails, keep the run non-fatal and proceed in BM25-only mode.
+
 ### Required Derived Artifacts
 
 Generate:
@@ -236,6 +252,7 @@ Generate:
 5. `$AUDIT_INDEX_DIR/derived/read_plan.md`
 
 `catalog.json` is the source of truth for system mapping.
+`run_index.sh` should call `build_derived_artifacts.sh` so these files exist before analysis starts.
 
 Fallback rule (only when needed):
 
@@ -266,6 +283,8 @@ Execution constraints for this phase:
 3. For large files, read only relevant sections around matched lines.
 4. Do not launch broad parallel reads of every source file.
 5. If tool output indicates token/size limits, reduce file scope and continue with sampled evidence.
+6. For generated graph data, use shell extraction (`rg`/`grep`/`head`) instead of `Read` on raw dot files.
+7. Do not compute hotspot LOC using overlapping shell globs (for example `src/*.rs src/**/*.rs`) because that double-counts files.
 
 ## Phase 3: Semantic Duplication
 
@@ -315,15 +334,17 @@ Follow `references/core/prioritization.md` and `references/core/output-schema.md
 After writing `$AUDIT_REPORT_PATH`, run:
 
 ```bash
-PDF_OUT="$(bash "$SKILL_DIR/scripts/render_report_pdf.sh" --report "$AUDIT_REPORT_PATH")"
+PDF_OUT="$(bash "$SKILL_DIR/scripts/render_report_pdf.sh" --report "$AUDIT_REPORT_PATH" --map-mode crate)"
 printf '%s\n' "$PDF_OUT"
 ```
 
 Interpretation:
 
 1. `render_report_pdf.sh` attempts `render_system_map.sh` automatically (non-fatal).
-2. If output/logs contain `SYSTEM_MAP_PATH=...`, include that image as an additional artifact.
-3. If output/logs contain `SYSTEM_MAP_SKIPPED=1`, continue without failing the audit.
-4. If output contains `PDF_PATH=...`, include that file as an additional artifact.
-5. If output contains `PDF_SKIPPED=1`, continue without failing the audit.
-6. Do not install Graphviz or PDF tooling during the audit run unless the user explicitly asks.
+2. Prefer `--map-mode crate` for default report exports to keep diagrams readable and PDF-safe.
+3. If output/logs contain `SYSTEM_MAP_PATH=...`, include that image as an additional artifact.
+4. If output/logs contain `SYSTEM_MAP_SKIPPED=1`, continue without failing the audit.
+5. If output contains `PDF_PATH=...`, include that file as an additional artifact.
+6. If output contains `PDF_SKIPPED=1`, continue without failing the audit.
+7. If output contains `PDF_NOTE=rendered_without_system_map`, mention that the PDF fallback removed the system map image.
+8. Do not install Graphviz or PDF tooling during the audit run unless the user explicitly asks.
