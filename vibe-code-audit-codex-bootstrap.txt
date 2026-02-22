@@ -1,0 +1,180 @@
+VIBE CODE AUDIT – CODEX BOOTSTRAP FILE
+
+We are implementing a new Agent Skill called:
+
+vibe-code-audit
+
+This skill performs a repo-wide audit optimized for “vibe coded”
+software (parallel feature development, duplicated logic, inconsistent
+cross-cutting concerns, architectural drift).
+
+This is V1 (skill-only).
+
+------------------------------------------------------------------------
+
+HIGH-LEVEL PLAN
+
+V1 (Current Goal)
+
+-   Skill-only implementation
+-   Skill runs:
+    -   llmcc (multi-depth structural graphs)
+    -   agentroot (hybrid BM25 + embedding search)
+-   Skill generates:
+    -   audit_index/ artifacts
+    -   audit_report.md
+-   No custom Rust CLI yet
+-   No external services
+
+V2 (Future)
+
+-   Build Rust CLI wrapper: vibeindex
+-   It orchestrates llmcc + agentroot + clustering
+-   Skill later calls vibeindex index
+-   Same artifact contract
+
+------------------------------------------------------------------------
+
+ASSUMPTIONS
+
+You may assume:
+
+-   llmcc is installed and on PATH
+-   agentroot is installed and on PATH
+-   You have permission to execute shell commands
+-   You have filesystem access
+
+Primary stack: Rust backend + React/TypeScript frontend.
+
+------------------------------------------------------------------------
+
+SKILL LOCATION
+
+Create:
+
+.codex/skills/vibe-code-audit/SKILL.md
+
+Follow Agent Skills format: - YAML frontmatter (name, description
+required) - Markdown body instructions
+
+------------------------------------------------------------------------
+
+REQUIRED SKILL BEHAVIOR
+
+1.  Validate prerequisites:
+    -   llmcc –version
+    -   agentroot –version
+    -   Fail fast if missing
+2.  Create:
+
+audit_index/
+
+3.  Record versions + timestamp in:
+
+audit_index/manifest.json
+
+4.  Run llmcc: If Cargo.toml exists:
+
+-   depth1
+-   depth2
+-   depth3
+-   depth3 PageRank top-K
+
+If tsconfig.json exists: - depth2 - depth3 - depth3 PageRank top-K
+
+Store under:
+
+audit_index/llmcc/
+
+5.  Run agentroot index with excludes:
+
+.git node_modules target dist build .next coverage
+
+Store under:
+
+audit_index/agentroot/
+
+6.  Validate hybrid search works.
+
+7.  Generate derived artifacts:
+
+audit_index/derived/catalog.json audit_index/derived/hotspots.json
+audit_index/derived/dup_clusters.md
+
+Dup clusters (V1 heuristic): - Use llmcc PageRank top-K as candidate
+set - For each hotspot: - Run agentroot semantic similarity - Identify
+similar chunks - Group into clusters (heuristic threshold) - Only
+include clusters of size ≥ 3 - Prefer cross-directory clusters
+
+8.  Produce:
+
+audit_report.md
+
+Sections required: 1. Executive Summary 2. System Map 3. Hotspots
+Overview 4. Pattern Inconsistencies 5. Duplication Clusters 6. Risk
+Findings 7. Refactor Bundles 8. Roadmap
+
+Constraints: - Cap findings to top 10 - Cap bundles to 3–8 - Avoid
+lint-level issues - Every finding must include evidence (file paths) -
+Confidence must be ≥ 0.7
+
+------------------------------------------------------------------------
+
+Begin implementation.
+
+FULL CONVERSATION CONTEXT (DETAILED SUMMARY)
+
+This project originated from the goal of creating a 100/10 “vibe code
+audit” skill. The focus is auditing software built by multiple
+developers working in parallel, leading to duplication, inconsistent
+abstractions, and architectural drift.
+
+Key design decisions from the discussion:
+
+1.  The audit must be catalogue-first.
+2.  It must prioritize semantic duplication (not just text duplication).
+3.  It must produce refactor bundles, not laundry lists.
+4.  It must be language-agnostic but optimized for Rust +
+    React/TypeScript.
+5.  It must use structural analysis + semantic retrieval together.
+
+We explored tools and selected:
+
+-   llmcc for multi-depth structural graphs (crate/module/symbol +
+    PageRank).
+-   agentroot for hybrid retrieval (BM25 + vector embeddings) with
+    AST-aware chunking.
+
+We decided:
+
+V1: - The skill directly runs llmcc + agentroot. - Generates audit_index
+artifacts. - Produces a structured audit report. - Uses heuristic
+duplication clustering (not exhaustive).
+
+V2: - Build Rust CLI wrapper “vibeindex”. - Formalize artifact
+generation and clustering. - Skill becomes artifact consumer only.
+
+Quality bar agreed upon: - No lint noise. - No speculative findings. -
+High-confidence evidence-based output. - Prioritized refactor bundles. -
+Emphasis on consolidation and architectural clarity.
+
+Core audit phases:
+
+1.  Indexing
+2.  System mapping
+3.  Pattern inconsistency scan
+4.  Semantic duplication discovery
+5.  Architecture boundary analysis
+6.  Risk audit
+7.  Refactor bundle synthesis
+8.  Prioritized roadmap
+
+Primary optimization target: Messy, organically grown Rust backend +
+React frontend repositories.
+
+The implementation must be deterministic, repeatable, and safe
+(read-only).
+
+------------------------------------------------------------------------
+
+Generated on: 2026-02-22T08:33:19.252809 UTC

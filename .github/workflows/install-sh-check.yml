@@ -1,0 +1,18 @@
+name: Check install.sh
+
+on:
+  pull_request:
+    paths:
+      - "install.sh"
+      - ".github/workflows/install-sh-check.yml"
+
+jobs:
+  shell-syntax:
+    name: Shell syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate install.sh syntax
+        run: sh -n install.sh
