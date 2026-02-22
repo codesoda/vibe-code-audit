@@ -20,9 +20,11 @@ sh install.sh
 
 1. Finds the local skill source (`./vibe-code-audit/SKILL.md`) when available.
 2. Falls back to downloading `vibe-code-audit/SKILL.md` from GitHub raw when run via `curl | sh`.
-3. Checks for required dependencies: `llmcc` and `agentroot`.
-4. Offers to install missing dependencies (via `cargo install`).
-5. Offers to install the skill into:
+3. Symlinks local installs to your checked-out `vibe-code-audit/` folder (so updates in repo are immediately reflected).
+4. Copies files for remote installs (`curl | sh` path).
+5. Checks for required dependencies: `llmcc` and `agentroot`.
+6. Offers to install missing dependencies (via `cargo install`).
+7. Offers to install the skill into:
    - `~/.codex/skills/vibe-code-audit`
    - `~/.claude/skills/vibe-code-audit`
 

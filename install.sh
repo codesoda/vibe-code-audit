@@ -17,6 +17,7 @@ INSTALL_CLAUDE=1
 
 TMP_DIR=""
 SOURCE_DIR=""
+SOURCE_MODE="remote"
 
 info() {
   printf "[%s] %s\n" "$SKILL_NAME" "$*"
@@ -123,6 +124,7 @@ fetch_to_file() {
 resolve_source_dir() {
   if [ -f "./${SKILL_NAME}/SKILL.md" ]; then
     SOURCE_DIR="$(pwd)/${SKILL_NAME}"
+    SOURCE_MODE="local"
     info "Using local skill source at ${SOURCE_DIR}."
     return 0
   fi
@@ -132,6 +134,7 @@ resolve_source_dir() {
       script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
       if [ -n "$script_dir" ] && [ -f "$script_dir/${SKILL_NAME}/SKILL.md" ]; then
         SOURCE_DIR="$script_dir/${SKILL_NAME}"
+        SOURCE_MODE="local"
         info "Using skill source next to install.sh at ${SOURCE_DIR}."
         return 0
       fi
@@ -140,13 +143,20 @@ resolve_source_dir() {
 
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/${SKILL_NAME}.XXXXXX")"
   SOURCE_DIR="${TMP_DIR}/${SKILL_NAME}"
+  SOURCE_MODE="remote"
   mkdir -p "$SOURCE_DIR"
 
   remote_skill_url="${RAW_BASE}/${SKILL_NAME}/SKILL.md"
+  remote_report_template_url="${RAW_BASE}/${SKILL_NAME}/REPORT_TEMPLATE.md"
   info "Fetching skill from ${remote_skill_url}."
 
   if ! fetch_to_file "$remote_skill_url" "${SOURCE_DIR}/SKILL.md"; then
     die "Unable to download SKILL.md (need curl or wget, and network access)."
+  fi
+
+  info "Fetching template from ${remote_report_template_url}."
+  if ! fetch_to_file "$remote_report_template_url" "${SOURCE_DIR}/REPORT_TEMPLATE.md"; then
+    warn "Could not download REPORT_TEMPLATE.md; continuing without it."
   fi
 }
 
@@ -227,6 +237,13 @@ install_skill_to_root() {
 
   mkdir -p "$root"
   rm -rf "$target"
+
+  if [ "$SOURCE_MODE" = "local" ]; then
+    ln -s "$SOURCE_DIR" "$target"
+    info "Symlinked skill to ${target} -> ${SOURCE_DIR}"
+    return 0
+  fi
+
   mkdir -p "$target"
   cp -R "${SOURCE_DIR}/." "$target/"
   info "Installed skill to ${target}"

@@ -4,8 +4,8 @@ on:
   pull_request:
 
 jobs:
-  shell-syntax:
-    name: Shell syntax check
+  install-script:
+    name: install.sh checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -13,3 +13,40 @@ jobs:
 
       - name: Validate install.sh syntax
         run: sh -n install.sh
+
+      - name: Verify local install creates symlinks
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex_dir="$(mktemp -d)"
+          claude_dir="$(mktemp -d)"
+
+          CODEX_SKILLS_DIR="$codex_dir" CLAUDE_SKILLS_DIR="$claude_dir" sh install.sh --yes --skip-deps
+
+          test -L "$codex_dir/vibe-code-audit"
+          test -L "$claude_dir/vibe-code-audit"
+
+          codex_target="$(readlink "$codex_dir/vibe-code-audit")"
+          claude_target="$(readlink "$claude_dir/vibe-code-audit")"
+          expected_target="$GITHUB_WORKSPACE/vibe-code-audit"
+
+          test "$codex_target" = "$expected_target"
+          test "$claude_target" = "$expected_target"
+
+      - name: Verify piped install creates copied files
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex_dir="$(mktemp -d)"
+          run_dir="$(mktemp -d)"
+
+          cd "$run_dir"
+          cat "$GITHUB_WORKSPACE/install.sh" | env \
+            VIBE_CODE_AUDIT_RAW_BASE="file://$GITHUB_WORKSPACE" \
+            CODEX_SKILLS_DIR="$codex_dir" \
+            sh -s -- --yes --skip-deps --codex-only
+
+          test -d "$codex_dir/vibe-code-audit"
+          test ! -L "$codex_dir/vibe-code-audit"
+          test -f "$codex_dir/vibe-code-audit/SKILL.md"
+          test -f "$codex_dir/vibe-code-audit/REPORT_TEMPLATE.md"

@@ -223,7 +223,7 @@ Write `audit_report.md` with this exact section order:
 7. Refactor Bundles
 8. Roadmap
 
-If `REPORT_TEMPLATE.md` exists, align headings and table shape to it while preserving the required section order above.
+If bundled template `./REPORT_TEMPLATE.md` is available (relative to this skill directory), align headings and table shape to it while preserving the required section order above.
 
 ## Definition of Done
 
