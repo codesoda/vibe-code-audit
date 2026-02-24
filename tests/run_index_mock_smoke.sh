@@ -138,6 +138,10 @@ supports_json="${MOCK_AGENTROOT_FORMAT_JSON:-1}"
 index_fail="${MOCK_AGENTROOT_INDEX_FAIL:-0}"
 doc_count="${MOCK_AGENTROOT_DOC_COUNT:-23}"
 embedded_count="${MOCK_AGENTROOT_EMBEDDED_COUNT:-23}"
+embed_fail="${MOCK_AGENTROOT_EMBED_FAIL:-0}"
+embed_fail_utf8="${MOCK_AGENTROOT_EMBED_FAIL_UTF8:-0}"
+query_fail="${MOCK_AGENTROOT_QUERY_FAIL:-0}"
+vsearch_fail="${MOCK_AGENTROOT_VSEARCH_FAIL:-0}"
 
 emit_status_json() {
   printf '{"document_count": %s, "embedded_count": %s}\n' "$doc_count" "$embedded_count"
@@ -228,6 +232,15 @@ case "$cmd" in
     printf 'updated\n'
     ;;
   embed)
+    if [ "$embed_fail" = "1" ]; then
+      if [ "$embed_fail_utf8" = "1" ]; then
+        printf "thread 'main' panicked at src/index/ast_chunker/oversized.rs:39:31:\n" >&2
+        printf "byte index 12256 is not a char boundary; it is inside '—' (bytes 12255..12258)\n" >&2
+      else
+        printf 'error: forced embed failure\n' >&2
+      fi
+      exit 2
+    fi
     printf 'embedded\n'
     ;;
   status)
@@ -245,6 +258,18 @@ case "$cmd" in
     shift
     query_text="${1:-}"
     shift || true
+    if [ "$cmd" = "query" ] && [ "$query_fail" = "1" ]; then
+      printf 'Error: HTTP error: error sending request for url (http://localhost:8000/v1/embeddings)\n' >&2
+      printf '\nCaused by:\n    0: error sending request for url (http://localhost:8000/v1/embeddings)\n' >&2
+      printf '    1: client error (Connect)\n    2: tcp connect error\n    3: Connection refused (os error 61)\n' >&2
+      exit 2
+    fi
+    if [ "$cmd" = "vsearch" ] && [ "$vsearch_fail" = "1" ]; then
+      printf 'Error: HTTP error: error sending request for url (http://localhost:8000/v1/embeddings)\n' >&2
+      printf '\nCaused by:\n    0: error sending request for url (http://localhost:8000/v1/embeddings)\n' >&2
+      printf '    1: client error (Connect)\n    2: tcp connect error\n    3: Connection refused (os error 61)\n' >&2
+      exit 2
+    fi
     if [ "${1:-}" = "--format" ]; then
       if [ "${2:-}" = "json" ] && [ "$supports_json" = "1" ]; then
         printf '{"query": "%s", "count": 1}\n' "$query_text"
@@ -274,6 +299,17 @@ run_case() {
   expected_llmcc_mode="$7"
   expected_agentroot_mode="$8"
   repo_layout="${9:-root-rust}"
+  mock_embedded_count="${10:-23}"
+  auto_embed_env="${11:-unset}"
+  expected_embed_attempted="${12:-0}"
+  expected_embed_ok="${13:-0}"
+  expected_embed_backend="${14:-none}"
+  mock_embed_fail="${15:-0}"
+  mock_embed_fail_utf8="${16:-0}"
+  mock_query_fail="${17:-0}"
+  mock_vsearch_fail="${18:-0}"
+  expected_retrieval_mode="${19:-}"
+  expected_embed_utf8_panic="${20:-0}"
 
   (
     set -euo pipefail
@@ -321,8 +357,22 @@ EOF_RS
     export MOCK_AGENTROOT_FORMAT_JSON="$agentroot_format_json"
     export MOCK_AGENTROOT_INDEX_FAIL="$agentroot_index_fail"
     export MOCK_AGENTROOT_DOC_COUNT="23"
-    export MOCK_AGENTROOT_EMBEDDED_COUNT="23"
-    unset VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED
+    export MOCK_AGENTROOT_EMBEDDED_COUNT="$mock_embedded_count"
+    export MOCK_AGENTROOT_EMBED_FAIL="$mock_embed_fail"
+    export MOCK_AGENTROOT_EMBED_FAIL_UTF8="$mock_embed_fail_utf8"
+    export MOCK_AGENTROOT_QUERY_FAIL="$mock_query_fail"
+    export MOCK_AGENTROOT_VSEARCH_FAIL="$mock_vsearch_fail"
+    case "$auto_embed_env" in
+      unset)
+        unset VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED
+        ;;
+      0|1)
+        export VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED="$auto_embed_env"
+        ;;
+      *)
+        fail "case $case_name: invalid auto_embed_env=$auto_embed_env"
+        ;;
+    esac
 
     run_output="$(
       bash "$RUN_INDEX_SCRIPT" \
@@ -356,18 +406,30 @@ EOF_RS
 
     query_ok="$(json_int "$manifest" "retrieval_query_ok")"
     vsearch_ok="$(json_int "$manifest" "retrieval_vsearch_ok")"
-    [ "$query_ok" -eq 1 ] || [ "$vsearch_ok" -eq 1 ] || \
-      fail "case $case_name: expected at least one retrieval check to pass"
+    if [ "$expected_retrieval_mode" != "bm25-only" ]; then
+      [ "$query_ok" -eq 1 ] || [ "$vsearch_ok" -eq 1 ] || \
+        fail "case $case_name: expected at least one retrieval check to pass"
+    fi
 
     embed_attempted="$(json_int "$manifest" "agentroot_embed_attempted")"
     embed_ok="$(json_int "$manifest" "agentroot_embed_ok")"
     embed_backend="$(json_string "$manifest" "agentroot_embed_backend")"
-    [ "$embed_attempted" -eq 0 ] || \
-      fail "case $case_name: expected agentroot_embed_attempted=0"
-    [ "$embed_ok" -eq 0 ] || \
-      fail "case $case_name: expected agentroot_embed_ok=0"
-    [ "$embed_backend" = "none" ] || \
-      fail "case $case_name: expected agentroot_embed_backend=none"
+    [ "$embed_attempted" -eq "$expected_embed_attempted" ] || \
+      fail "case $case_name: expected agentroot_embed_attempted=$expected_embed_attempted, got $embed_attempted"
+    [ "$embed_ok" -eq "$expected_embed_ok" ] || \
+      fail "case $case_name: expected agentroot_embed_ok=$expected_embed_ok, got $embed_ok"
+    [ "$embed_backend" = "$expected_embed_backend" ] || \
+      fail "case $case_name: expected agentroot_embed_backend=$expected_embed_backend, got $embed_backend"
+
+    embed_utf8_panic="$(json_int "$manifest" "agentroot_embed_utf8_panic")"
+    [ "$embed_utf8_panic" -eq "$expected_embed_utf8_panic" ] || \
+      fail "case $case_name: expected agentroot_embed_utf8_panic=$expected_embed_utf8_panic, got $embed_utf8_panic"
+
+    if [ -n "$expected_retrieval_mode" ]; then
+      retrieval_mode="$(json_string "$manifest" "retrieval_mode")"
+      [ "$retrieval_mode" = "$expected_retrieval_mode" ] || \
+        fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
+    fi
 
     printf '[run_index_mock_smoke] PASS: %s\n' "$case_name"
     rm -rf "$work_dir"
@@ -390,5 +452,21 @@ run_case "nested-rust-workspace-marker" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "nested-rust"
+
+run_case "auto-embed-default-on-when-vectors-missing" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "0" "unset" "1" "1" "direct"
+
+run_case "auto-embed-opt-out-when-vectors-missing" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "0" "0" "0" "0" "none"
+
+run_case "embed-utf8-panic-falls-back-to-bm25" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "0" "unset" "1" "0" "direct" \
+  "1" "1" "1" "1" "bm25-only" "1"
 
 printf '[run_index_mock_smoke] All smoke cases passed.\n'

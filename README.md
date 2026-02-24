@@ -86,15 +86,23 @@ Stack marker detection is recursive (not only repo root), so nested Rust/TS work
   - `agentroot query/vsearch`: retries without `--format json` when needed.
 - Validates indexing quality via `agentroot status --format json`.
 - Fails fast if `agentroot_document_count == 0` after fallback indexing.
-- Runs retrieval checks (`query` + `vsearch`) and requires at least one to succeed.
+- Runs retrieval checks (`query` + `vsearch`).
+- If retrieval checks fail due embed instability (for example agentroot UTF-8 panic or embedding transport failures), run continues in degraded BM25 mode by default.
+- Set `VIBE_CODE_AUDIT_RETRIEVAL_STRICT=1` to keep strict failure behavior.
 - Continues in degraded mode when vectors are unavailable:
   - `retrieval_mode = "bm25-only"` in `manifest.json`
   - analysis should rely on stronger direct-file evidence in this mode.
 
-Optional auto-embed attempt:
+Auto-embed attempt (enabled by default):
 
 ```sh
-VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1 \
+bash vibe-code-audit/scripts/run_index.sh --repo /path/to/repo --mode standard
+```
+
+Disable auto-embed (for troubleshooting or explicitly BM25-only runs):
+
+```sh
+VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=0 \
 bash vibe-code-audit/scripts/run_index.sh --repo /path/to/repo --mode standard
 ```
 
@@ -105,19 +113,24 @@ Auto-embed behavior:
 - If `agentroot` reports HTTP embedding connection failures, it:
   - retries against an already-running service on `127.0.0.1:8000`, or
   - optionally boots `llama-server` locally (when available) with larger ctx/batch defaults.
+- When `run_index.sh` invokes the helper, it keeps a helper-started local embedding server alive through retrieval validation and then cleans it up.
 - If embedding still fails (including known `agentroot` UTF-8 chunk panic cases), indexing continues in BM25 mode and does not fail the audit run.
 - Manifest now records:
   - `agentroot_embed_attempted`
   - `agentroot_embed_ok`
   - `agentroot_embed_backend`
+  - `agentroot_embed_utf8_panic`
 
 Useful embed environment toggles:
 
 ```sh
-VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1
+VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=0
 VIBE_CODE_AUDIT_EMBED_START_LOCAL=1
+VIBE_CODE_AUDIT_EMBED_KEEP_SERVER=1
+VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS=60
 VIBE_CODE_AUDIT_EMBED_MODEL_PATH="$HOME/.local/share/agentroot/nomic-embed.gguf"
 VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL=0
+VIBE_CODE_AUDIT_RETRIEVAL_STRICT=0
 ```
 
 Manual embedding retry (against an existing audit index):
@@ -180,6 +193,12 @@ When running through Claude Code, use subagents and model routing by phase:
 - `opus`: high-severity ambiguity resolution only
 
 See `vibe-code-audit/references/claude/subagents-and-model-routing.md` for concrete templates and routing rules.
+
+Timeout guidance for Claude Code:
+
+- `run_index.sh` with auto-embed can exceed 5 minutes on medium repos.
+- Prefer background execution + `TaskOutput` polling.
+- Use a larger tool timeout for blocking waits (recommended: `900000` to `1800000` ms).
 
 ## What `install.sh` does
 

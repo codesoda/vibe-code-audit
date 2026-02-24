@@ -29,12 +29,22 @@ Machine-readable output:
   OUTPUT_DIR=<resolved absolute output dir>
 
 Environment:
-  VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1
-    Attempt `agentroot embed` automatically when embeddings are missing.
+  VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=0
+    Disable automatic `agentroot embed` attempts when embeddings are missing
+    (default: enabled).
   VIBE_CODE_AUDIT_EMBED_START_LOCAL=1
     When auto-embed is enabled, allow local llama-server bootstrapping.
+  VIBE_CODE_AUDIT_EMBED_KEEP_SERVER=0|1
+    Keep helper-started local embedding server alive until retrieval validation
+    completes in this script (default in this script: 1).
+  VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS=<n>
+    Passed to the embed helper for local server health wait budget
+    (default in helper: 60s).
   VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL=1
     Allow helper script to download the default nomic GGUF model when missing.
+  VIBE_CODE_AUDIT_RETRIEVAL_STRICT=1
+    Fail the run when both retrieval checks fail, even if embed instability is
+    detected (default: 0, degrade to BM25-only when possible).
 USAGE
 }
 
@@ -71,6 +81,18 @@ kv_from_file() {
   key="$2"
   value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
   printf '%s\n' "$value"
+}
+
+has_pattern_in_files() {
+  pattern="$1"
+  shift
+  for file in "$@"; do
+    [ -f "$file" ] || continue
+    if grep -Eqi "$pattern" "$file"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 REPO_PATH=""
@@ -167,6 +189,15 @@ RUST_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/rust"
 TS_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/ts"
 AGENTROOT_OUT_DIR="$AUDIT_INDEX_DIR/agentroot"
 DERIVED_OUT_DIR="$AUDIT_INDEX_DIR/derived"
+
+EMBED_SERVER_PID=""
+cleanup_embed_server() {
+  if [ -n "${EMBED_SERVER_PID:-}" ]; then
+    kill "$EMBED_SERVER_PID" >/dev/null 2>&1 || true
+    EMBED_SERVER_PID=""
+  fi
+}
+trap cleanup_embed_server EXIT
 
 log "repo: $REPO_PATH_ABS"
 log "output: $OUTPUT_DIR_ABS"
@@ -331,7 +362,7 @@ run_agentroot_vsearch_check() {
 }
 
 attempt_agentroot_embed() {
-  if [ "${VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED:-0}" != "1" ]; then
+  if [ "${VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED:-1}" != "1" ]; then
     return 0
   fi
   if [ "$AGENTROOT_EMBEDDED_COUNT" -gt 0 ]; then
@@ -339,13 +370,15 @@ attempt_agentroot_embed() {
   fi
 
   EMBED_ATTEMPTED=1
-  log "Attempting agentroot embed (VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1)"
+  log "Attempting agentroot embed (VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=${VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED:-1})"
 
   EMBED_HELPER_SCRIPT="$SCRIPT_DIR/run_agentroot_embed.sh"
   EMBED_RUNNER_OUT="$AGENTROOT_OUT_DIR/embed_runner.txt"
 
   if [ -x "$EMBED_HELPER_SCRIPT" ]; then
-    if bash "$EMBED_HELPER_SCRIPT" --db "$AGENTROOT_DB_PATH" --output-dir "$AGENTROOT_OUT_DIR" >"$EMBED_RUNNER_OUT" 2>&1; then
+    EMBED_KEEP_SERVER="${VIBE_CODE_AUDIT_EMBED_KEEP_SERVER:-1}"
+    if VIBE_CODE_AUDIT_EMBED_KEEP_SERVER="$EMBED_KEEP_SERVER" \
+      bash "$EMBED_HELPER_SCRIPT" --db "$AGENTROOT_DB_PATH" --output-dir "$AGENTROOT_OUT_DIR" >"$EMBED_RUNNER_OUT" 2>&1; then
       EMBED_OK=1
     else
       warn "agentroot embed helper failed (see $EMBED_RUNNER_OUT)"
@@ -353,6 +386,14 @@ attempt_agentroot_embed() {
     EMBED_BACKEND_CANDIDATE="$(kv_from_file "$EMBED_RUNNER_OUT" "EMBED_BACKEND")"
     if [ -n "$EMBED_BACKEND_CANDIDATE" ]; then
       EMBED_BACKEND="$EMBED_BACKEND_CANDIDATE"
+    fi
+    EMBED_UTF8_PANIC_CANDIDATE="$(kv_from_file "$EMBED_RUNNER_OUT" "EMBED_UTF8_PANIC")"
+    if [ "$EMBED_UTF8_PANIC_CANDIDATE" = "1" ]; then
+      EMBED_UTF8_PANIC=1
+    fi
+    EMBED_SERVER_PID_CANDIDATE="$(kv_from_file "$EMBED_RUNNER_OUT" "EMBED_SERVER_PID")"
+    if [ -n "$EMBED_SERVER_PID_CANDIDATE" ] && printf '%s' "$EMBED_SERVER_PID_CANDIDATE" | grep -Eq '^[0-9]+$'; then
+      EMBED_SERVER_PID="$EMBED_SERVER_PID_CANDIDATE"
     fi
   else
     warn "embed helper script is missing: $EMBED_HELPER_SCRIPT"
@@ -369,6 +410,10 @@ attempt_agentroot_embed() {
     AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
   else
     warn "agentroot status check failed after embed attempt (see $AGENTROOT_OUT_DIR/status.json)"
+  fi
+
+  if [ "$EMBED_UTF8_PANIC" -eq 1 ]; then
+    warn "Detected agentroot UTF-8 chunking panic; forcing BM25-only fallback behavior"
   fi
 }
 
@@ -391,6 +436,8 @@ VSEARCH_OK=0
 EMBED_ATTEMPTED=0
 EMBED_OK=0
 EMBED_BACKEND="none"
+EMBED_UTF8_PANIC=0
+RETRIEVAL_STRICT="${VIBE_CODE_AUDIT_RETRIEVAL_STRICT:-0}"
 
 if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
   log "Running agentroot index"
@@ -510,16 +557,39 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   fi
 fi
 
-[ "$QUERY_OK" -eq 1 ] || [ "$VSEARCH_OK" -eq 1 ] || die "retrieval checks failed (query + vsearch)"
 test -s "$AGENTROOT_OUT_DIR/query_check.txt" || die "query_check.txt was not written"
 test -s "$AGENTROOT_OUT_DIR/vsearch_check.txt" || die "vsearch_check.txt was not written"
 
-if [ "$AGENTROOT_EMBEDDED_COUNT" -gt 0 ] && ! grep -qi 'No vector embeddings found' "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+if [ "$QUERY_OK" -ne 1 ] && [ "$VSEARCH_OK" -ne 1 ]; then
+  RETRIEVAL_TRANSPORT_ERROR=0
+  if has_pattern_in_files 'localhost:8000/v1/embeddings|/v1/embeddings|Connection refused|error sending request for url.*embeddings' \
+    "$AGENTROOT_OUT_DIR/query_check.txt" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+    RETRIEVAL_TRANSPORT_ERROR=1
+  fi
+
+  if [ "$AGENTROOT_DOC_COUNT" -gt 0 ] && \
+    { [ "$EMBED_UTF8_PANIC" -eq 1 ] || [ "$RETRIEVAL_TRANSPORT_ERROR" -eq 1 ] || [ "$EMBED_ATTEMPTED" -eq 1 ]; }; then
+    if [ "$RETRIEVAL_STRICT" = "1" ]; then
+      die "retrieval checks failed (query + vsearch) in strict mode"
+    fi
+    warn "retrieval checks failed; continuing with BM25-only mode due embed instability"
+  else
+    die "retrieval checks failed (query + vsearch)"
+  fi
+fi
+
+if [ "$EMBED_UTF8_PANIC" -eq 1 ]; then
+  RETRIEVAL_MODE="bm25-only"
+  warn "Vector retrieval disabled due agentroot UTF-8 chunking panic"
+elif [ "$VSEARCH_OK" -eq 1 ] && [ "$AGENTROOT_EMBEDDED_COUNT" -gt 0 ] && \
+  ! grep -qi 'No vector embeddings found' "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
   RETRIEVAL_MODE="hybrid"
 else
   RETRIEVAL_MODE="bm25-only"
   warn "Vector embeddings unavailable; continuing with BM25-only retrieval"
 fi
+
+cleanup_embed_server
 
 popd >/dev/null
 
@@ -570,6 +640,7 @@ cat > "$MANIFEST_PATH" <<MANIFEST
   "agentroot_embed_attempted": $EMBED_ATTEMPTED,
   "agentroot_embed_ok": $EMBED_OK,
   "agentroot_embed_backend": "$(json_escape "$EMBED_BACKEND")",
+  "agentroot_embed_utf8_panic": $EMBED_UTF8_PANIC,
   "retrieval_mode": "$(json_escape "$RETRIEVAL_MODE")",
   "retrieval_query_ok": $QUERY_OK,
   "retrieval_vsearch_ok": $VSEARCH_OK,

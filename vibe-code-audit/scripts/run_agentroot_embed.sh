@@ -19,7 +19,7 @@ Options:
   --force              Pass --force to agentroot embed
   --no-start-local     Do not auto-start llama-server on connection failures
   --download-model     Download default nomic GGUF if missing (off by default)
-  --wait-seconds <n>   Max seconds to wait for local server health (default: 25)
+  --wait-seconds <n>   Max seconds to wait for local server health (default: 60)
   --keep-server        Keep locally-started llama-server running after completion
   --help               Show this help
 
@@ -148,8 +148,10 @@ emit_result() {
   printf 'EMBED_OK=%s\n' "$ok"
   printf 'EMBED_BACKEND=%s\n' "$backend"
   printf 'EMBED_LOG=%s\n' "$log_path"
+  printf 'EMBED_UTF8_PANIC=%s\n' "$UTF8_PANIC"
   if [ "$SERVER_STARTED" -eq 1 ]; then
     printf 'EMBED_SERVER_LOG=%s\n' "$LLAMA_SERVER_LOG"
+    printf 'EMBED_SERVER_PID=%s\n' "$LLAMA_PID"
   fi
 }
 
@@ -167,7 +169,7 @@ HOST="${VIBE_CODE_AUDIT_EMBED_HOST:-127.0.0.1}"
 PORT="${VIBE_CODE_AUDIT_EMBED_PORT:-8000}"
 START_LOCAL="${VIBE_CODE_AUDIT_EMBED_START_LOCAL:-1}"
 DOWNLOAD_MODEL="${VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL:-0}"
-WAIT_SECONDS="${VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS:-25}"
+WAIT_SECONDS="${VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS:-60}"
 KEEP_SERVER="${VIBE_CODE_AUDIT_EMBED_KEEP_SERVER:-0}"
 LLAMA_CTX_SIZE="${VIBE_CODE_AUDIT_EMBED_CTX_SIZE:-8192}"
 LLAMA_BATCH_SIZE="${VIBE_CODE_AUDIT_EMBED_BATCH_SIZE:-8192}"
@@ -179,6 +181,7 @@ LLAMA_PID=""
 LLAMA_SERVER_LOG=""
 EMBED_LOG=""
 EMBED_RETRY_LOG=""
+UTF8_PANIC=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -282,7 +285,8 @@ if has_pattern_in_files 'input is too large to process' "$EMBED_LOG" "$EMBED_RET
   warn "Embedding backend rejected batch size; prefer llama-server with larger ctx/batch settings"
 fi
 
-if has_pattern_in_files 'byte index [0-9]+ is not a char boundary' "$EMBED_LOG" "$EMBED_RETRY_LOG"; then
+if has_pattern_in_files 'byte index [0-9]+ is not a char boundary|panicked at .*oversized\.rs' "$EMBED_LOG" "$EMBED_RETRY_LOG"; then
+  UTF8_PANIC=1
   warn "agentroot hit UTF-8 chunking panic while embedding; continue in BM25-only mode for now"
 fi
 

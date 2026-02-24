@@ -16,6 +16,7 @@ Use this phase-to-agent/model mapping:
    - Runner: main thread
    - Model: `sonnet`
    - Action: run deterministic scripts only (`run_index.sh` handles embed helper flow when enabled)
+   - Timeout: for blocking waits, prefer `900000` to `1800000` ms; indexing + embed can exceed 5 minutes on medium repos
 2. Discovery and codebase exploration
    - Runner: built-in Explore subagent (read-only)
    - Model: `haiku` (built-in Explore is optimized for this)
@@ -106,4 +107,4 @@ Evaluate only top-risk candidates. Require concrete evidence. Resolve severity a
 4. Merge subagent results in main thread and enforce final confidence thresholds.
 5. Use portable search commands (`rg`, `grep -E`, `grep -oE`); do not use `grep -P`.
 6. Do not `Read` generated graph/image/binary artifacts (`*.dot`, `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.pdf`).
-7. If vectors are missing, prefer rerunning with `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1` before manual embed command sprawl.
+7. If vectors are missing, prefer rerunning with default auto-embed behavior before manual embed command sprawl. Set `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=0` only when intentionally disabling embed attempts.

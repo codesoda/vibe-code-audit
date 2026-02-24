@@ -140,6 +140,7 @@ Use deterministic command execution for indexing:
 1. Resolve `skill_dir` first.
 2. Execute a single Bash action:
    - `<skill_dir>/scripts/run_index.sh --repo <repo_path> --mode <budget_mode>`
+   - In Claude Code, use a larger command timeout for indexing (`>=900000 ms` recommended) or run in background and poll task output.
 3. If custom output is needed, pass `--output <output_dir>` to the same command.
 4. `run_index.sh` auto-runs read-plan generation unless `--skip-read-plan` is used.
 5. `run_index.sh` auto-runs derived artifact bootstrap (`catalog.json`, `hotspots.json`, `dup_clusters.md`).
@@ -151,13 +152,14 @@ Use deterministic command execution for indexing:
 11. Verify expected artifact files/directories after each indexing stage.
 12. Read `<output_dir>/audit_index/manifest.json` before analysis and enforce:
    - `agentroot_document_count > 0`
-   - `retrieval_query_ok == 1` or `retrieval_vsearch_ok == 1`
+   - `retrieval_query_ok == 1` or `retrieval_vsearch_ok == 1` or `retrieval_mode == "bm25-only"`
 13. If `retrieval_mode` is `bm25-only`, continue in degraded mode (do not abort), but rely more on direct file evidence and explicit `rg` corroboration.
-14. If `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1`, let `run_index.sh` drive embedding via `run_agentroot_embed.sh`; avoid manual ad-hoc embed orchestration in normal flow.
+14. `run_index.sh` auto-embed is enabled by default; let it drive embedding via `run_agentroot_embed.sh` and avoid manual ad-hoc embed orchestration in normal flow. Use `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=0` only when intentionally disabling embed attempts.
 15. For embed troubleshooting, read manifest fields:
    - `agentroot_embed_attempted`
    - `agentroot_embed_ok`
    - `agentroot_embed_backend`
+   - `agentroot_embed_utf8_panic`
 16. Never use `grep -P` / `grep -oP`; use `rg` or portable `grep -E`/`grep -oE`.
 17. Avoid `Read` on large generated artifacts (`*.dot`, huge logs, image files) unless recovery mode requires it.
 18. `run_index.sh` already includes CLI-compatibility fallbacks; if it fails, rerun once and inspect its stderr instead of manually re-implementing indexing with many ad-hoc commands.

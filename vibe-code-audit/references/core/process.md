@@ -57,7 +57,7 @@ VSEARCH_OK="$(sed -n 's/.*"retrieval_vsearch_ok"[[:space:]]*:[[:space:]]*\([0-9]
 RETRIEVAL_MODE="$(sed -n 's/.*"retrieval_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST_PATH" | head -n1)"
 
 [ "${DOC_COUNT:-0}" -gt 0 ] || { echo "agentroot document_count is zero"; exit 1; }
-[ "${QUERY_OK:-0}" -eq 1 ] || [ "${VSEARCH_OK:-0}" -eq 1 ] || { echo "both retrieval checks failed"; exit 1; }
+[ "${QUERY_OK:-0}" -eq 1 ] || [ "${VSEARCH_OK:-0}" -eq 1 ] || [ "${RETRIEVAL_MODE:-}" = "bm25-only" ] || { echo "retrieval checks failed without bm25 fallback"; exit 1; }
 [ -s "$AUDIT_INDEX_DIR/derived/catalog.json" ] || { echo "catalog.json missing"; exit 1; }
 [ -s "$AUDIT_INDEX_DIR/derived/hotspots.json" ] || { echo "hotspots.json missing"; exit 1; }
 [ -s "$AUDIT_INDEX_DIR/derived/dup_clusters.md" ] || { echo "dup_clusters.md missing"; exit 1; }
@@ -66,6 +66,7 @@ RETRIEVAL_MODE="$(sed -n 's/.*"retrieval_mode"[[:space:]]*:[[:space:]]*"\([^"]*\
 If script path is unavailable, execute the manual sequence below.
 If `build_derived_artifacts.sh` is unavailable, still create `catalog.json`, `hotspots.json`, and `dup_clusters.md` manually before analysis.
 If `build_read_plan.sh` is unavailable, still create `read_plan.tsv` and `read_plan.md` manually with bounded limits from `references/core/context-budget.md`.
+When running through Claude Code tools, use a larger timeout for indexing (`>=900000 ms` recommended) or run in background and poll output.
 
 ### Preflight
 
@@ -129,14 +130,15 @@ Write `$AUDIT_INDEX_DIR/manifest.json` with:
 13. `agentroot_embed_attempted`
 14. `agentroot_embed_ok`
 15. `agentroot_embed_backend`
-16. `retrieval_mode`
-17. `retrieval_query_ok`
-18. `retrieval_vsearch_ok`
-19. `exclude_patterns`
-20. `modes_enabled`
-21. `pagerank_top_k`
-22. `budget_mode`
-23. `command_runner`
+16. `agentroot_embed_utf8_panic`
+17. `retrieval_mode`
+18. `retrieval_query_ok`
+19. `retrieval_vsearch_ok`
+20. `exclude_patterns`
+21. `modes_enabled`
+22. `pagerank_top_k`
+23. `budget_mode`
+24. `command_runner`
 
 ### Structural Graphs
 
@@ -235,7 +237,7 @@ test -s "$AUDIT_INDEX_DIR/agentroot/vsearch_check.txt"
 
 If output indicates missing vectors, continue in BM25-only mode and mark `retrieval_mode` accordingly in `manifest.json`.
 
-If `VIBE_CODE_AUDIT_AGENTROOT_AUTO_EMBED=1` and `agentroot_embedded_count == 0`:
+If `agentroot_embedded_count == 0` (auto-embed is enabled by default):
 
 1. Prefer `run_index.sh` auto flow (it invokes `run_agentroot_embed.sh`).
 2. Do not hand-roll ad-hoc embed orchestration unless troubleshooting.
