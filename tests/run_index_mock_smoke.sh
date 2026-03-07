@@ -343,6 +343,18 @@ fn main() {
     println!("nested");
 }
 EOF_RS
+    elif [ "$repo_layout" = "ts-node" ]; then
+      mkdir -p "$repo_dir/src"
+      cat > "$repo_dir/tsconfig.json" <<'EOF_TS'
+{"compilerOptions": {"target": "es2020", "module": "commonjs"}}
+EOF_TS
+      cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-ts-repo", "version": "1.0.0"}
+EOF_PKG
+      cat > "$repo_dir/src/app.ts" <<'EOF_TSRC'
+const greeting: string = "hello";
+console.log(greeting);
+EOF_TSRC
     elif [ "$repo_layout" = "js-only" ]; then
       mkdir -p "$repo_dir/src"
       cat > "$repo_dir/package.json" <<'EOF_PKG'
@@ -483,6 +495,19 @@ EOF_RS
         fail "case $case_name: expected catalog stacks.typescript=false for nested-rust layout, got $catalog_ts"
       [ "$catalog_js" = "false" ] || \
         fail "case $case_name: expected catalog stacks.javascript=false for nested-rust layout, got $catalog_js"
+    elif [ "$repo_layout" = "ts-node" ]; then
+      [ "$catalog_rust" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.rust=false for ts-node layout, got $catalog_rust"
+      [ "$catalog_ts" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=true for ts-node layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for ts-node layout, got $catalog_js"
+
+      # TS graph artifacts must exist and be non-empty
+      ts_graph_dir="$resolved_output/audit_index/llmcc/ts"
+      assert_nonempty_file "$ts_graph_dir/depth2.dot"
+      assert_nonempty_file "$ts_graph_dir/depth3.dot"
+      assert_nonempty_file "$ts_graph_dir/depth3_topk.dot"
     elif [ "$repo_layout" = "js-only" ]; then
       [ "$catalog_rust" = "false" ] || \
         fail "case $case_name: expected catalog stacks.rust=false for js-only layout, got $catalog_rust"
@@ -531,6 +556,11 @@ run_case "js-only-repo-stack-flags" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "js-only"
+
+run_case "ts-node-repo-stack-flags" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "ts-node"
 
 run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag" "flag" "collection" "1" "0" \
