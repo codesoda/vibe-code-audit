@@ -381,7 +381,8 @@ attempt_agentroot_embed() {
       bash "$EMBED_HELPER_SCRIPT" --db "$AGENTROOT_DB_PATH" --output-dir "$AGENTROOT_OUT_DIR" >"$EMBED_RUNNER_OUT" 2>&1; then
       EMBED_OK=1
     else
-      warn "agentroot embed helper failed (see $EMBED_RUNNER_OUT)"
+      warn "agentroot embed helper did not produce embeddings (see $EMBED_RUNNER_OUT)"
+      warn "Audit will continue with BM25-only search — this is normal without a local embedding server"
     fi
     EMBED_BACKEND_CANDIDATE="$(kv_from_file "$EMBED_RUNNER_OUT" "EMBED_BACKEND")"
     if [ -n "$EMBED_BACKEND_CANDIDATE" ]; then

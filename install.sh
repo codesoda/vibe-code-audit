@@ -19,16 +19,80 @@ TMP_DIR=""
 SOURCE_DIR=""
 SOURCE_MODE="remote"
 
+# ---------------------------------------------------------------------------
+# Color definitions — soft pastels that work on both light and dark terminals
+# Uses 256-color mode for broader compatibility
+# ---------------------------------------------------------------------------
+if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+  USE_COLOR=1
+else
+  USE_COLOR=0
+fi
+
+if [ "$USE_COLOR" -eq 1 ]; then
+  C_RESET='\033[0m'
+  C_BOLD='\033[1m'
+  C_DIM='\033[2m'
+  # Soft lavender for headers
+  C_HEADER='\033[38;5;141m'
+  # Soft mint for success/info
+  C_OK='\033[38;5;114m'
+  # Soft peach for warnings
+  C_WARN='\033[38;5;216m'
+  # Soft rose for errors
+  C_ERR='\033[38;5;210m'
+  # Soft sky blue for prompts
+  C_PROMPT='\033[38;5;117m'
+  # Soft grey for secondary text
+  C_DIM_TEXT='\033[38;5;249m'
+  # Soft cyan for check marks
+  C_CHECK='\033[38;5;151m'
+else
+  C_RESET=''
+  C_BOLD=''
+  C_DIM=''
+  C_HEADER=''
+  C_OK=''
+  C_WARN=''
+  C_ERR=''
+  C_PROMPT=''
+  C_DIM_TEXT=''
+  C_CHECK=''
+fi
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+header() {
+  printf '\n%b%b  %s%b\n' "$C_BOLD" "$C_HEADER" "$*" "$C_RESET"
+  printf '%b  %s%b\n' "$C_DIM_TEXT" "$(echo "$*" | sed 's/./-/g')" "$C_RESET"
+}
+
 info() {
-  printf "[%s] %s\n" "$SKILL_NAME" "$*"
+  printf '%b  %s%b\n' "$C_OK" "$*" "$C_RESET"
+}
+
+dim() {
+  printf '%b  %s%b\n' "$C_DIM_TEXT" "$*" "$C_RESET"
+}
+
+ok() {
+  printf '%b  ✓ %s%b\n' "$C_CHECK" "$*" "$C_RESET"
+}
+
+# Print primary text with dimmed parenthetical suffix
+ok_with_detail() {
+  primary="$1"
+  detail="$2"
+  printf '%b  ✓ %s %b(%s)%b\n' "$C_CHECK" "$primary" "$C_DIM_TEXT" "$detail" "$C_RESET"
 }
 
 warn() {
-  printf "[%s] WARNING: %s\n" "$SKILL_NAME" "$*" >&2
+  printf '%b  ! %s%b\n' "$C_WARN" "$*" "$C_RESET" >&2
 }
 
 die() {
-  printf "[%s] ERROR: %s\n" "$SKILL_NAME" "$*" >&2
+  printf '%b  ✗ %s%b\n' "$C_ERR" "$*" "$C_RESET" >&2
   exit 1
 }
 
@@ -65,6 +129,9 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# ---------------------------------------------------------------------------
+# Prompt helper
+# ---------------------------------------------------------------------------
 prompt_yes_no() {
   question="$1"
   default="${2:-yes}"
@@ -83,7 +150,7 @@ prompt_yes_no() {
 
   if [ -r /dev/tty ]; then
     while :; do
-      printf "%s %s " "$question" "$prompt" > /dev/tty
+      printf '\n%b  %s %b%s%b ' "$C_PROMPT" "$question" "$C_BOLD" "$prompt" "$C_RESET" > /dev/tty
       if ! IFS= read -r answer < /dev/tty; then
         break
       fi
@@ -96,14 +163,22 @@ prompt_yes_no() {
           fi
           return 1
           ;;
-        *) printf "Please answer yes or no.\n" > /dev/tty ;;
+        *) printf '%b  Please answer yes or no.%b\n' "$C_DIM_TEXT" "$C_RESET" > /dev/tty ;;
       esac
     done
   fi
 
-  [ "$fallback" = "yes" ]
+  if [ "$fallback" = "yes" ]; then
+    info "Non-interactive: auto-accepting '$question'"
+    return 0
+  fi
+  info "Non-interactive: auto-declining '$question'"
+  return 1
 }
 
+# ---------------------------------------------------------------------------
+# Network fetch
+# ---------------------------------------------------------------------------
 fetch_to_file() {
   url="$1"
   out="$2"
@@ -121,11 +196,14 @@ fetch_to_file() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# Source resolution
+# ---------------------------------------------------------------------------
 resolve_source_dir() {
   if [ -f "./${SKILL_NAME}/SKILL.md" ]; then
     SOURCE_DIR="$(pwd)/${SKILL_NAME}"
     SOURCE_MODE="local"
-    info "Using local skill source at ${SOURCE_DIR}."
+    ok "Using local skill source at ${SOURCE_DIR}"
     return 0
   fi
 
@@ -135,7 +213,7 @@ resolve_source_dir() {
       if [ -n "$script_dir" ] && [ -f "$script_dir/${SKILL_NAME}/SKILL.md" ]; then
         SOURCE_DIR="$script_dir/${SKILL_NAME}"
         SOURCE_MODE="local"
-        info "Using skill source next to install.sh at ${SOURCE_DIR}."
+        ok "Using skill source next to install.sh at ${SOURCE_DIR}"
         return 0
       fi
       ;;
@@ -152,7 +230,7 @@ resolve_source_dir() {
   manifest_tmp="${TMP_DIR}/INSTALL_MANIFEST.txt"
 
   if fetch_to_file "$remote_manifest_url" "$manifest_tmp"; then
-    info "Fetching skill files from ${remote_manifest_url}."
+    info "Fetching skill files from ${remote_manifest_url}"
     while IFS= read -r rel_path || [ -n "$rel_path" ]; do
       case "$rel_path" in
         ""|\#*)
@@ -183,20 +261,23 @@ resolve_source_dir() {
   fi
 
   if [ ! -f "${SOURCE_DIR}/SKILL.md" ]; then
-    info "Fetching skill from ${remote_skill_url}."
+    info "Fetching skill from ${remote_skill_url}"
     if ! fetch_to_file "$remote_skill_url" "${SOURCE_DIR}/SKILL.md"; then
       die "Unable to download SKILL.md (need curl or wget, and network access)."
     fi
   fi
 
   if [ ! -f "${SOURCE_DIR}/REPORT_TEMPLATE.md" ]; then
-    info "Fetching template from ${remote_report_template_url}."
+    info "Fetching template from ${remote_report_template_url}"
     if ! fetch_to_file "$remote_report_template_url" "${SOURCE_DIR}/REPORT_TEMPLATE.md"; then
       warn "Could not download REPORT_TEMPLATE.md; continuing without it."
     fi
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Dependency helpers
+# ---------------------------------------------------------------------------
 ensure_rust_toolchain() {
   if command -v cargo >/dev/null 2>&1; then
     return 0
@@ -212,7 +293,7 @@ ensure_rust_toolchain() {
     return 1
   fi
 
-  info "Installing Rust toolchain with rustup."
+  info "Installing Rust toolchain with rustup..."
   if ! sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"; then
     warn "Rust toolchain installation failed."
     return 1
@@ -232,7 +313,7 @@ install_dependency() {
   dep="$1"
 
   if command -v "$dep" >/dev/null 2>&1; then
-    info "Dependency found: ${dep}"
+    ok "${dep} found"
     return 0
   fi
 
@@ -260,7 +341,7 @@ install_dependency() {
   export PATH
 
   if command -v "$dep" >/dev/null 2>&1; then
-    info "Dependency installed: ${dep}"
+    ok "${dep} installed"
     return 0
   fi
 
@@ -268,6 +349,34 @@ install_dependency() {
   return 1
 }
 
+brew_or_apt_install() {
+  pkg="$1"
+  label="${2:-$pkg}"
+
+  if command -v brew >/dev/null 2>&1; then
+    info "Running: brew install ${pkg}"
+    if brew install "$pkg"; then
+      return 0
+    fi
+    warn "brew install ${pkg} failed"
+    return 1
+  elif command -v apt-get >/dev/null 2>&1; then
+    info "Running: sudo apt-get install -y ${pkg}"
+    if sudo apt-get install -y "$pkg"; then
+      return 0
+    fi
+    warn "apt-get install ${pkg} failed"
+    return 1
+  else
+    warn "No supported package manager found (brew or apt-get)"
+    warn "Install ${label} manually"
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Skill install
+# ---------------------------------------------------------------------------
 install_skill_to_root() {
   root="$1"
   target="${root}/${SKILL_NAME}"
@@ -277,14 +386,18 @@ install_skill_to_root() {
 
   if [ "$SOURCE_MODE" = "local" ]; then
     ln -s "$SOURCE_DIR" "$target"
-    info "Symlinked skill to ${target} -> ${SOURCE_DIR}"
+    ok "Symlinked ${target} -> ${SOURCE_DIR}"
     return 0
   fi
 
   mkdir -p "$target"
   cp -R "${SOURCE_DIR}/." "$target/"
-  info "Installed skill to ${target}"
+  ok "Installed skill to ${target}"
 }
+
+# =========================================================================
+# Main
+# =========================================================================
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -313,20 +426,100 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Banner
+printf '\n%b%b  vibe-code-audit installer%b\n' "$C_BOLD" "$C_HEADER" "$C_RESET"
+printf '%b  =========================%b\n\n' "$C_DIM_TEXT" "$C_RESET"
+
 resolve_source_dir
 
+# --- Core dependencies ---------------------------------------------------
+
+header "Core Dependencies"
+
 if [ "$SKIP_DEPS" -eq 1 ]; then
-  info "Skipping dependency checks (--skip-deps)."
+  dim "Skipping dependency checks (--skip-deps)."
 else
   install_dependency "llmcc" || true
   install_dependency "agentroot" || true
 fi
 
+# --- Search mode ----------------------------------------------------------
+
+header "Search Mode"
+
+dim "vibe-code-audit can use either:"
+printf '\n'
+dim "  BM25 text search     No extra dependencies, works out of the box"
+dim "  Vector embeddings    Better semantic recall, needs llama-server (~300MB model download)"
+printf '\n'
+
+if prompt_yes_no "Enable vector embeddings?" yes; then
+  EMBED_REQUESTED=1
+  if command -v llama-server >/dev/null 2>&1; then
+    ok_with_detail "llama-server already installed" "$(command -v llama-server)"
+  elif brew_or_apt_install "llama.cpp" "llama-server"; then
+    ok "llama-server installed"
+  else
+    warn "Could not install llama-server — you can retry manually later"
+    EMBED_REQUESTED=0
+  fi
+
+  if [ "$EMBED_REQUESTED" -eq 1 ]; then
+    EMBED_ENV_FILE="$HOME/.config/vibe-code-audit/embed.env"
+    mkdir -p "$(dirname "$EMBED_ENV_FILE")"
+    printf 'VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL=1\n' > "$EMBED_ENV_FILE"
+    ok "Embedding model will download automatically on first audit run"
+    dim "Config: $EMBED_ENV_FILE"
+  fi
+else
+  ok_with_detail "Using BM25 text search" "no extra setup needed"
+fi
+
+# --- PDF export -----------------------------------------------------------
+
+header "PDF Export"
+
+dim "Generate PDF reports from audit results."
+dim "Requires pandoc + a PDF engine."
+printf '\n'
+
+if prompt_yes_no "Install PDF export support?" yes; then
+  PDF_OK=1
+
+  if command -v pandoc >/dev/null 2>&1; then
+    ok_with_detail "pandoc already installed" "$(command -v pandoc)"
+  elif brew_or_apt_install "pandoc" "pandoc"; then
+    ok "pandoc installed"
+  else
+    warn "Could not install pandoc"
+    PDF_OK=0
+  fi
+
+  if command -v tectonic >/dev/null 2>&1; then
+    ok_with_detail "tectonic already installed" "$(command -v tectonic)"
+  elif brew_or_apt_install "tectonic" "tectonic"; then
+    ok "tectonic installed"
+  else
+    warn "Could not install tectonic"
+    PDF_OK=0
+  fi
+
+  if [ "$PDF_OK" -eq 0 ]; then
+    warn "PDF export partially installed — some tools are missing"
+  fi
+else
+  dim "Skipped PDF export (you can install pandoc + tectonic later)"
+fi
+
+# --- Skill installation ---------------------------------------------------
+
+header "Skill Installation"
+
 if [ "$INSTALL_CODEX" -eq 1 ]; then
   if prompt_yes_no "Install ${SKILL_NAME} to ${CODEX_SKILLS_DIR}?" yes; then
     install_skill_to_root "$CODEX_SKILLS_DIR"
   else
-    info "Skipped Codex install."
+    dim "Skipped Codex install"
   fi
 fi
 
@@ -334,28 +527,44 @@ if [ "$INSTALL_CLAUDE" -eq 1 ]; then
   if prompt_yes_no "Install ${SKILL_NAME} to ${CLAUDE_SKILLS_DIR}?" yes; then
     install_skill_to_root "$CLAUDE_SKILLS_DIR"
   else
-    info "Skipped Claude install."
+    dim "Skipped Claude install"
   fi
 fi
+
+# --- Summary --------------------------------------------------------------
+
+header "Summary"
 
 missing=0
 for dep in llmcc agentroot; do
   if command -v "$dep" >/dev/null 2>&1; then
-    info "Ready: ${dep} ($(command -v "$dep"))"
+    ok_with_detail "${dep} ready" "$(command -v "$dep")"
   else
     warn "Still missing: ${dep}"
     missing=1
   fi
 done
 
-if [ "$missing" -eq 1 ]; then
-  warn "Skill was installed, but required dependencies are still missing."
-  warn "Install them manually, then re-run this script if needed."
-  warn "If cargo is installed:"
-  warn "  cargo install llmcc"
-  warn "  cargo install agentroot"
-  warn "If cargo is missing, install Rust first:"
-  warn "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+if command -v llama-server >/dev/null 2>&1; then
+  ok_with_detail "llama-server ready" "vector embeddings enabled"
+else
+  printf '%b  llama-server not installed %b(using BM25 text search)%b\n' "$C_DIM_TEXT" "$C_DIM" "$C_RESET"
 fi
 
-info "Done."
+if command -v pandoc >/dev/null 2>&1 && { command -v tectonic >/dev/null 2>&1 || command -v xelatex >/dev/null 2>&1; }; then
+  ok "PDF export ready"
+else
+  dim "PDF export not available"
+fi
+
+if [ "$missing" -eq 1 ]; then
+  printf '\n'
+  warn "Skill was installed, but required dependencies are still missing."
+  warn "Install them manually, then re-run this script if needed."
+  dim "  cargo install llmcc"
+  dim "  cargo install agentroot"
+  dim "If cargo is missing, install Rust first:"
+  dim "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+fi
+
+printf '\n%b%b  Done!%b\n\n' "$C_BOLD" "$C_OK" "$C_RESET"

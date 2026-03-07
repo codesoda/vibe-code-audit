@@ -2,6 +2,24 @@
 
 Repo-wide audit skill for "vibe-coded" codebases (parallel feature development, semantic duplication, inconsistent cross-cutting concerns, and architectural drift).
 
+## Prerequisites
+
+Required:
+
+- **Rust toolchain** (`cargo`) — the installer can set this up for you via [rustup](https://rustup.rs)
+
+The installer checks for dependencies and offers to install them automatically.
+
+The installer will ask whether you want **vector embeddings** or **BM25-only text search**:
+
+- **BM25-only** — no extra dependencies, works out of the box
+- **Vector embeddings** — the installer handles `llama-server` installation and flags the embedding model (~300MB) for automatic download on first audit run
+
+Optional (for PDF export):
+
+- `pandoc` + a PDF engine (`tectonic`, `typst`, `xelatex`, `pdflatex`, `wkhtmltopdf`, or `weasyprint`)
+- `dot` (Graphviz) for system map diagrams
+
 ## Install
 
 Install from GitHub:

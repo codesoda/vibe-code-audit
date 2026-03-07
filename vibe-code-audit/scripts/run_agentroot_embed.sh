@@ -161,6 +161,13 @@ cleanup() {
   fi
 }
 
+# Source persistent embed config from installer if present
+EMBED_ENV_FILE="$HOME/.config/vibe-code-audit/embed.env"
+if [ -f "$EMBED_ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$EMBED_ENV_FILE"
+fi
+
 DB_PATH=""
 OUTPUT_DIR=""
 MODEL_PATH="${VIBE_CODE_AUDIT_EMBED_MODEL_PATH:-$HOME/.local/share/agentroot/nomic-embed.gguf}"
@@ -168,7 +175,15 @@ MODEL_URL="${VIBE_CODE_AUDIT_EMBED_MODEL_URL:-https://huggingface.co/nomic-ai/no
 HOST="${VIBE_CODE_AUDIT_EMBED_HOST:-127.0.0.1}"
 PORT="${VIBE_CODE_AUDIT_EMBED_PORT:-8000}"
 START_LOCAL="${VIBE_CODE_AUDIT_EMBED_START_LOCAL:-1}"
-DOWNLOAD_MODEL="${VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL:-0}"
+if [ -z "${VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL:-}" ]; then
+  if command -v llama-server >/dev/null 2>&1; then
+    DOWNLOAD_MODEL=1
+  else
+    DOWNLOAD_MODEL=0
+  fi
+else
+  DOWNLOAD_MODEL="$VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL"
+fi
 WAIT_SECONDS="${VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS:-60}"
 KEEP_SERVER="${VIBE_CODE_AUDIT_EMBED_KEEP_SERVER:-0}"
 LLAMA_CTX_SIZE="${VIBE_CODE_AUDIT_EMBED_CTX_SIZE:-8192}"
@@ -276,7 +291,8 @@ if has_pattern_in_files 'localhost:8000/v1/embeddings|/v1/embeddings|Connection 
         exit 0
       fi
     else
-      warn "Could not start local llama-server"
+      warn "Could not start local llama-server (this is OK — audit will use BM25-only search)"
+      warn "To enable vector embeddings, install llama.cpp: brew install llama.cpp"
     fi
   fi
 fi
