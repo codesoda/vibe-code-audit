@@ -135,6 +135,8 @@ emit_result() {
 cleanup() {
   if [ "$SERVER_STARTED" -eq 1 ] && [ -n "${LLAMA_PID:-}" ] && [ "$KEEP_SERVER" -ne 1 ]; then
     kill "$LLAMA_PID" >/dev/null 2>&1 || true
+    LLAMA_PID=""
+    SERVER_STARTED=0
   fi
 }
 
@@ -245,7 +247,7 @@ EMBED_LOG="$OUTPUT_DIR/embed.log"
 EMBED_RETRY_LOG="$OUTPUT_DIR/embed_retry.log"
 LLAMA_SERVER_LOG="$OUTPUT_DIR/llama_server.log"
 
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 BACKEND="direct"
 if run_embed "$EMBED_LOG"; then

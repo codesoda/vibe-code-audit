@@ -149,7 +149,7 @@ cleanup_embed_server() {
     EMBED_SERVER_PID=""
   fi
 }
-trap cleanup_embed_server EXIT
+trap cleanup_embed_server EXIT INT TERM
 
 log "repo: $REPO_PATH_ABS"
 log "output: $OUTPUT_DIR_ABS"
