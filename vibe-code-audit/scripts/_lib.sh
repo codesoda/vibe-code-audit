@@ -94,6 +94,73 @@ resolve_output_dir() {
 }
 
 # ---------------------------------------------------------------------------
+# Exclude-directory list and helpers
+# ---------------------------------------------------------------------------
+
+# Canonical list of directories to exclude from traversal.
+# All scripts MUST use these helpers instead of hardcoding directory names.
+# Space-delimited string (not a bash array) for POSIX compatibility.
+EXCLUDE_DIRS=".git node_modules target dist build .next coverage"
+
+# exclude_find_prune_args
+#   Outputs find(1) prune expression fragments for use inside \( ... \) -prune.
+#   Usage: find . \( $(exclude_find_prune_args) \) -prune -o ...
+#   Output: -name .git -o -name node_modules -o -name target ...
+exclude_find_prune_args() {
+  local first=1
+  local dir
+  for dir in $EXCLUDE_DIRS; do
+    if [ "$first" -eq 1 ]; then
+      first=0
+    else
+      printf ' -o '
+    fi
+    printf -- '-name %s' "$dir"
+  done
+}
+
+# exclude_agentroot_flags
+#   Outputs --exclude flags for agentroot CLI.
+#   Usage: agentroot index . $(exclude_agentroot_flags) --output ...
+#   Output: --exclude .git --exclude node_modules ...
+exclude_agentroot_flags() {
+  local dir
+  for dir in $EXCLUDE_DIRS; do
+    printf -- '--exclude %s ' "$dir"
+  done
+}
+
+# exclude_rg_globs
+#   Outputs ripgrep glob exclusion flags.
+#   Usage: rg $(exclude_rg_globs) PATTERN .
+#   Output: --glob '!.git/**' --glob '!node_modules/**' ...
+exclude_rg_globs() {
+  local dir
+  for dir in $EXCLUDE_DIRS; do
+    printf -- "--glob '!%s/**' " "$dir"
+  done
+}
+
+# exclude_dirs_json_array
+#   Outputs a JSON array of excluded directory names.
+#   Usage: "exclude_patterns": $(exclude_dirs_json_array),
+#   Output: [".git", "node_modules", "target", "dist", "build", ".next", "coverage"]
+exclude_dirs_json_array() {
+  local first=1
+  local dir
+  printf '['
+  for dir in $EXCLUDE_DIRS; do
+    if [ "$first" -eq 1 ]; then
+      first=0
+    else
+      printf ', '
+    fi
+    printf '"%s"' "$dir"
+  done
+  printf ']'
+}
+
+# ---------------------------------------------------------------------------
 # JSON helpers — RFC 8259 §7 compliant string escaping
 # ---------------------------------------------------------------------------
 
