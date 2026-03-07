@@ -321,6 +321,8 @@ run_case() {
   mock_vsearch_fail="${18:-0}"
   expected_retrieval_mode="${19:-}"
   expected_embed_utf8_panic="${20:-0}"
+  case_mode="${21:-standard}"
+  expected_top_k="${22:-}"
 
   (
     set -euo pipefail
@@ -413,7 +415,7 @@ EOF_RS
       bash "$RUN_INDEX_SCRIPT" \
         --repo "$repo_dir" \
         --output "$output_dir" \
-        --mode standard
+        --mode "$case_mode"
     )"
 
     resolved_output="$(printf '%s\n' "$run_output" | sed -n 's/^OUTPUT_DIR=//p' | tail -n1)"
@@ -479,6 +481,12 @@ EOF_RS
       retrieval_mode="$(json_string "$manifest" "retrieval_mode")"
       [ "$retrieval_mode" = "$expected_retrieval_mode" ] || \
         fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
+    fi
+
+    if [ -n "$expected_top_k" ]; then
+      actual_top_k="$(json_int "$manifest" "pagerank_top_k")"
+      [ "$actual_top_k" -eq "$expected_top_k" ] || \
+        fail "case $case_name: expected pagerank_top_k=$expected_top_k, got $actual_top_k"
     fi
 
     catalog="$resolved_output/audit_index/derived/catalog.json"
@@ -561,6 +569,20 @@ run_case "ts-node-repo-stack-flags" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "ts-node"
+
+run_case "mode-fast-top-k-80" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "fast" "80"
+
+run_case "mode-deep-top-k-350" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "deep" "350"
 
 run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag" "flag" "collection" "1" "0" \
