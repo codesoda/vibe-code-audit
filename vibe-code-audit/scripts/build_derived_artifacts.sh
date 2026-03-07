@@ -78,6 +78,17 @@ done
 [ -n "$OUTPUT_DIR" ] || die "--output is required"
 [ -d "$REPO_PATH" ] || die "repo path not found: $REPO_PATH"
 
+# Validate --has-* flags: must be 0 or 1 if provided
+if [ -n "$FLAG_HAS_RUST" ]; then
+  case "$FLAG_HAS_RUST" in 0|1) ;; *) die "--has-rust: invalid value '$FLAG_HAS_RUST' (expected 0 or 1)" ;; esac
+fi
+if [ -n "$FLAG_HAS_TS" ]; then
+  case "$FLAG_HAS_TS" in 0|1) ;; *) die "--has-ts: invalid value '$FLAG_HAS_TS' (expected 0 or 1)" ;; esac
+fi
+if [ -n "$FLAG_HAS_JS" ]; then
+  case "$FLAG_HAS_JS" in 0|1) ;; *) die "--has-js: invalid value '$FLAG_HAS_JS' (expected 0 or 1)" ;; esac
+fi
+
 REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
 OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
@@ -193,17 +204,17 @@ HAS_FRONTEND="false"
 WORKSPACE_DETECTED="false"
 
 if [ -n "$FLAG_HAS_RUST" ]; then
-  [ "$FLAG_HAS_RUST" -eq 1 ] 2>/dev/null && HAS_RUST="true"
+  [ "$FLAG_HAS_RUST" = "1" ] && HAS_RUST="true"
 else
   [ -f "$REPO_PATH_ABS/Cargo.toml" ] && HAS_RUST="true"
 fi
 if [ -n "$FLAG_HAS_TS" ]; then
-  [ "$FLAG_HAS_TS" -eq 1 ] 2>/dev/null && HAS_TS="true"
+  [ "$FLAG_HAS_TS" = "1" ] && HAS_TS="true"
 else
   [ -f "$REPO_PATH_ABS/tsconfig.json" ] && HAS_TS="true"
 fi
 if [ -n "$FLAG_HAS_JS" ]; then
-  [ "$FLAG_HAS_JS" -eq 1 ] 2>/dev/null && HAS_JS="true"
+  [ "$FLAG_HAS_JS" = "1" ] && HAS_JS="true"
 else
   [ -f "$REPO_PATH_ABS/package.json" ] && HAS_JS="true"
 fi
