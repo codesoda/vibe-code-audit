@@ -224,6 +224,10 @@ REPORT_UPDATED=0
 IMAGE_REF="$(basename "$IMAGE_PATH")"
 IMAGE_LINE="![System Map - module dependencies and boundaries]($IMAGE_REF)"
 
+tmp_report=""
+cleanup() { rm -f "$tmp_report"; }
+trap cleanup EXIT INT TERM
+
 if [ "$NO_EDIT" -eq 0 ] && ! grep -Fq "]($IMAGE_REF)" "$REPORT_PATH_ABS"; then
   tmp_report="$(mktemp "${TMPDIR:-/tmp}/vca-system-map-report.XXXXXX")"
   awk -v image_line="$IMAGE_LINE" '
