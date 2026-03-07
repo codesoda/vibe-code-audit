@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="run_agentroot_embed.sh"
+SCRIPT_NAME="run_agentroot_embed"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -36,31 +38,6 @@ Environment overrides:
   VIBE_CODE_AUDIT_EMBED_BATCH_SIZE
   VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-has_pattern_in_files() {
-  pattern="$1"
-  shift
-  for file in "$@"; do
-    [ -f "$file" ] || continue
-    if grep -Eqi "$pattern" "$file"; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 health_url() {
