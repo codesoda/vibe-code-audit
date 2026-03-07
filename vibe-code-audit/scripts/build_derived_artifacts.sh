@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="build_derived_artifacts.sh"
+SCRIPT_NAME="build_derived_artifacts"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -15,19 +17,6 @@ Writes:
   <output_dir>/audit_index/derived/hotspots.json
   <output_dir>/audit_index/derived/dup_clusters.md
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 REPO_PATH=""
@@ -72,11 +61,7 @@ done
 [ -d "$REPO_PATH" ] || die "repo path not found: $REPO_PATH"
 
 REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
-OUTPUT_DIR_ABS="$OUTPUT_DIR"
-case "$OUTPUT_DIR_ABS" in
-  /*) ;;
-  *) OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)" ;;
-esac
+OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
 AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
 DERIVED_DIR="$AUDIT_INDEX_DIR/derived"

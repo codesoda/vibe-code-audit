@@ -34,8 +34,7 @@ die() {
 #   Returns the integer on stdout; defaults to 0 if the file is missing,
 #   the key is absent, or the value is non-numeric.
 #   Used by run_index.sh to parse agentroot status.json fields
-#   (document_count, embedded_count). Inline copy remains in run_index.sh
-#   until migration spec 07.
+#   (document_count, embedded_count).
 json_int_from_file() {
   local file="${1-}"
   local key="${2-}"
@@ -53,8 +52,7 @@ json_int_from_file() {
 #   (case-insensitive extended regex via grep -Eqi). Skips missing files.
 #   Short-circuits on first match. Returns 1 if no match found.
 #   Used by run_index.sh and run_agentroot_embed.sh for retrieval
-#   diagnostics and error classification. Inline copies remain until
-#   migration specs 07/10.
+#   diagnostics and error classification.
 has_pattern_in_files() {
   local pattern="${1-}"
   shift
