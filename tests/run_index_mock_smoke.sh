@@ -407,23 +407,28 @@ EOF_RS
     resolved_output="$(printf '%s\n' "$run_output" | sed -n 's/^OUTPUT_DIR=//p' | tail -n1)"
     [ -n "$resolved_output" ] || fail "case $case_name: run_index.sh did not emit OUTPUT_DIR"
 
-    manifest="$resolved_output/audit_index.tmp/manifest.json"
+    manifest="$resolved_output/audit_index/manifest.json"
     assert_nonempty_file "$manifest"
-    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/catalog.json"
-    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/hotspots.json"
-    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/dup_clusters.md"
-    [ -e "$resolved_output/audit_index.tmp/derived/read_plan.tsv" ] || \
+    assert_nonempty_file "$resolved_output/audit_index/derived/catalog.json"
+    assert_nonempty_file "$resolved_output/audit_index/derived/hotspots.json"
+    assert_nonempty_file "$resolved_output/audit_index/derived/dup_clusters.md"
+    [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
       fail "case $case_name: expected read_plan.tsv to exist"
-    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/read_plan.md"
+    assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
 
-    # [R-003] Guard: no nested audit_index.tmp/audit_index.tmp path produced
-    if [ -d "$resolved_output/audit_index.tmp/audit_index.tmp" ]; then
-      fail "case $case_name: nested audit_index.tmp/audit_index.tmp directory detected — contract mismatch"
+    # Guard: no nested audit_index/audit_index.tmp path produced
+    if [ -d "$resolved_output/audit_index/audit_index.tmp" ]; then
+      fail "case $case_name: nested audit_index/audit_index.tmp directory detected — contract mismatch"
     fi
 
-    # [R-006] Assert pre-existing audit_index/ is preserved during temp-dir generation
-    if [ ! -f "$resolved_output/audit_index/.pre_existing_marker" ]; then
-      fail "case $case_name: pre-existing audit_index/ was destroyed during audit_index.tmp generation"
+    # Assert no stale audit_index.tmp/ remains after successful run
+    if [ -d "$resolved_output/audit_index.tmp" ]; then
+      fail "case $case_name: audit_index.tmp/ still exists after successful run — atomic rename failed"
+    fi
+
+    # Pre-existing audit_index/ should be replaced (not preserved) on success
+    if [ -f "$resolved_output/audit_index/.pre_existing_marker" ]; then
+      fail "case $case_name: pre-existing sentinel still present — old audit_index/ was not replaced"
     fi
 
     llmcc_mode_actual="$(json_string "$manifest" "llmcc_mode")"
@@ -464,7 +469,7 @@ EOF_RS
         fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
     fi
 
-    catalog="$resolved_output/audit_index.tmp/derived/catalog.json"
+    catalog="$resolved_output/audit_index/derived/catalog.json"
     assert_nonempty_file "$catalog"
 
     catalog_rust="$(json_bool "$catalog" "rust")"
@@ -533,7 +538,51 @@ run_case "embed-utf8-panic-falls-back-to-bm25" \
   "root-rust" "0" "unset" "1" "0" "direct" \
   "1" "1" "1" "1" "bm25-only" "1"
 
-# [R-007] Shellcheck gate for modified pipeline scripts
+# --- Failure-path test: pre-existing audit_index/ preserved, audit_index.tmp/ cleaned up ---
+(
+  set -euo pipefail
+
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/vca-smoke.failure-cleanup.XXXXXX")"
+  repo_dir="$work_dir/repo"
+  output_dir="$work_dir/output"
+
+  # Create a minimal repo (no mock bins → llmcc not found → die)
+  mkdir -p "$repo_dir/src"
+  cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
+[package]
+name = "mock-fail"
+version = "0.1.0"
+edition = "2021"
+EOF_CARGO
+
+  # Pre-create audit_index/ with sentinel
+  mkdir -p "$output_dir/audit_index"
+  printf 'survivor\n' > "$output_dir/audit_index/.pre_existing_marker"
+
+  # Run without mock bins on PATH — llmcc check will die
+  # Use a clean PATH without mock bins
+  if PATH="/usr/bin:/bin" bash "$RUN_INDEX_SCRIPT" \
+    --repo "$repo_dir" \
+    --output "$output_dir" \
+    --mode standard >/dev/null 2>&1; then
+    fail "failure-cleanup: expected run_index.sh to fail when llmcc is missing"
+  fi
+
+  # Assert: pre-existing audit_index/ is preserved
+  if [ ! -f "$output_dir/audit_index/.pre_existing_marker" ]; then
+    fail "failure-cleanup: pre-existing audit_index/ was destroyed on failure"
+  fi
+
+  # Assert: audit_index.tmp/ is cleaned up
+  if [ -d "$output_dir/audit_index.tmp" ]; then
+    fail "failure-cleanup: audit_index.tmp/ still exists after failure — cleanup trap did not run"
+  fi
+
+  printf '[run_index_mock_smoke] PASS: failure-cleanup (pre-existing index preserved, tmp cleaned)\n'
+  rm -rf "$work_dir"
+)
+
+# Shellcheck gate for modified pipeline scripts
 PIPELINE_SCRIPTS=(
   "$ROOT_DIR/vibe-code-audit/scripts/run_index.sh"
   "$ROOT_DIR/vibe-code-audit/scripts/build_derived_artifacts.sh"

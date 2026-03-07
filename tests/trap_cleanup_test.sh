@@ -12,10 +12,10 @@ echo "=== Trap & Cleanup Tests ==="
 
 # --- Static checks: trap signatures ---
 
-if grep -q 'trap cleanup_embed_server EXIT INT TERM' "$SCRIPTS_DIR/run_index.sh"; then
-  pass "run_index.sh traps EXIT INT TERM"
+if grep -q 'trap cleanup_all EXIT INT TERM' "$SCRIPTS_DIR/run_index.sh"; then
+  pass "run_index.sh traps EXIT INT TERM via cleanup_all"
 else
-  fail "run_index.sh missing EXIT INT TERM trap"
+  fail "run_index.sh missing EXIT INT TERM trap via cleanup_all"
 fi
 
 if grep -q 'trap cleanup EXIT INT TERM' "$SCRIPTS_DIR/run_agentroot_embed.sh"; then
@@ -25,7 +25,7 @@ else
 fi
 
 # Negative: no EXIT-only traps in target scripts
-if grep -qE 'trap cleanup_embed_server EXIT$' "$SCRIPTS_DIR/run_index.sh"; then
+if grep -qE 'trap cleanup_all EXIT$' "$SCRIPTS_DIR/run_index.sh"; then
   fail "run_index.sh still has EXIT-only trap"
 else
   pass "run_index.sh has no EXIT-only trap"
@@ -62,12 +62,32 @@ fi
 # --- Static checks: trap registration ordering ---
 # Trap must be registered after function definition but before resource-critical code
 
-RUN_INDEX_FUNC_LINE=$(grep -n 'cleanup_embed_server()' "$SCRIPTS_DIR/run_index.sh" | head -1 | cut -d: -f1)
-RUN_INDEX_TRAP_LINE=$(grep -n 'trap cleanup_embed_server EXIT INT TERM' "$SCRIPTS_DIR/run_index.sh" | head -1 | cut -d: -f1)
+RUN_INDEX_FUNC_LINE=$(grep -n 'cleanup_all()' "$SCRIPTS_DIR/run_index.sh" | head -1 | cut -d: -f1)
+RUN_INDEX_TRAP_LINE=$(grep -n 'trap cleanup_all EXIT INT TERM' "$SCRIPTS_DIR/run_index.sh" | head -1 | cut -d: -f1)
 if [ "$RUN_INDEX_TRAP_LINE" -gt "$RUN_INDEX_FUNC_LINE" ]; then
   pass "run_index.sh trap registered after function definition (line $RUN_INDEX_FUNC_LINE < $RUN_INDEX_TRAP_LINE)"
 else
   fail "run_index.sh trap registered before function definition"
+fi
+
+# Verify cleanup_all calls both cleanup functions
+if grep -A5 'cleanup_all()' "$SCRIPTS_DIR/run_index.sh" | grep -q 'cleanup_embed_server'; then
+  pass "run_index.sh cleanup_all calls cleanup_embed_server"
+else
+  fail "run_index.sh cleanup_all missing cleanup_embed_server call"
+fi
+
+if grep -A5 'cleanup_all()' "$SCRIPTS_DIR/run_index.sh" | grep -q 'cleanup_audit_index_tmp'; then
+  pass "run_index.sh cleanup_all calls cleanup_audit_index_tmp"
+else
+  fail "run_index.sh cleanup_all missing cleanup_audit_index_tmp call"
+fi
+
+# Verify cleanup_audit_index_tmp has guard for undefined variable
+if awk '/^cleanup_audit_index_tmp\(\)/,/^}/' "$SCRIPTS_DIR/run_index.sh" | grep -q 'AUDIT_INDEX_DIR:-'; then
+  pass "run_index.sh cleanup_audit_index_tmp guards undefined AUDIT_INDEX_DIR"
+else
+  fail "run_index.sh cleanup_audit_index_tmp missing undefined variable guard"
 fi
 
 EMBED_FUNC_LINE=$(grep -n '^cleanup()' "$SCRIPTS_DIR/run_agentroot_embed.sh" | head -1 | cut -d: -f1)

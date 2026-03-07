@@ -149,7 +149,18 @@ cleanup_embed_server() {
     EMBED_SERVER_PID=""
   fi
 }
-trap cleanup_embed_server EXIT INT TERM
+
+cleanup_audit_index_tmp() {
+  if [ -n "${AUDIT_INDEX_DIR:-}" ] && [ -d "$AUDIT_INDEX_DIR" ]; then
+    rm -rf "$AUDIT_INDEX_DIR"
+  fi
+}
+
+cleanup_all() {
+  cleanup_embed_server
+  cleanup_audit_index_tmp
+}
+trap cleanup_all EXIT INT TERM
 
 log "repo: $REPO_PATH_ABS"
 log "output: $OUTPUT_DIR_ABS"
@@ -620,5 +631,8 @@ if [ "$SKIP_READ_PLAN" -eq 0 ]; then
   fi
 fi
 
-log "Indexing complete"
+log "Indexing complete — finalizing output"
+rm -rf "$OUTPUT_DIR_ABS/audit_index"
+mv "$AUDIT_INDEX_DIR" "$OUTPUT_DIR_ABS/audit_index"
+log "Renamed audit_index.tmp/ → audit_index/"
 printf 'OUTPUT_DIR=%s\n' "$OUTPUT_DIR_ABS"
