@@ -111,3 +111,4 @@
 {"session_uid":"267ced55cdf4125179b4e7b6b79abe6a2bb89e2b5fab4648fbd7ea1bc070ecf1","session_blob_sha":"09720b3fa581bc3424f1281e3f9b95c51b248ad5","session_start":1772893962,"agent":"codex","ingested_at":"2026-03-07T14:32:42Z"}
 {"session_uid":"6883249b432045d35d90a194c2abcf86cce8979c116b2c66f106b976ce767a50","session_blob_sha":"93367312d56d69a49dcaf4806f192839afb8b9be","session_start":1772894438,"agent":"claude-code","ingested_at":"2026-03-07T14:40:38Z"}
 {"session_uid":"1a05045af2c85bacbda2b8d411719e1a057a5444e4377083e27164e7726b0353","session_blob_sha":"86fcf69afb87a107ad3f82ddac4e53f3d7bbd970","session_start":1772893681,"agent":"codex","ingested_at":"2026-03-07T14:28:01Z"}
+{"session_uid":"00f78b871f404f0a83a8e14c3cbd0def0a59db621c1e3eeba674e0982f19afe1","session_blob_sha":"2430918b9b8825ddf7dce36e94c0e276c6a6ab81","session_start":1772893788,"agent":"codex","ingested_at":"2026-03-07T14:29:48Z"}
