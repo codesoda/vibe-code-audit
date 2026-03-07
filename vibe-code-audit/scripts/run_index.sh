@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="run_index.sh"
+SCRIPT_NAME="run_index"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -48,51 +50,11 @@ Environment:
 USAGE
 }
 
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
-
-json_int_from_file() {
-  file="$1"
-  key="$2"
-  value="$(sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" "$file" | head -n1)"
-  if [ -z "$value" ]; then
-    printf '0\n'
-  else
-    printf '%s\n' "$value"
-  fi
-}
-
 kv_from_file() {
   file="$1"
   key="$2"
   value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
   printf '%s\n' "$value"
-}
-
-has_pattern_in_files() {
-  pattern="$1"
-  shift
-  for file in "$@"; do
-    [ -f "$file" ] || continue
-    if grep -Eqi "$pattern" "$file"; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 REPO_PATH=""
@@ -172,17 +134,7 @@ if [ -z "$OUTPUT_DIR" ]; then
   OUTPUT_DIR="$REPO_PATH_ABS/vibe-code-audit/$TIMESTAMP"
 fi
 
-OUTPUT_DIR_ABS="$OUTPUT_DIR"
-case "$OUTPUT_DIR_ABS" in
-  /*)
-    mkdir -p "$OUTPUT_DIR_ABS"
-    OUTPUT_DIR_ABS="$(cd "$OUTPUT_DIR_ABS" && pwd)"
-    ;;
-  *)
-    mkdir -p "$REPO_PATH_ABS/$OUTPUT_DIR_ABS"
-    OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS/$OUTPUT_DIR_ABS" && pwd)"
-    ;;
-esac
+OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
 AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
 RUST_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/rust"
@@ -275,14 +227,8 @@ pushd "$REPO_PATH_ABS" >/dev/null
 
 repo_has_file_named() {
   name="$1"
-  if find . \
-    \( -path './.git' -o -path './.git/*' \
-       -o -path './target' -o -path './target/*' \
-       -o -path './node_modules' -o -path './node_modules/*' \
-       -o -path './dist' -o -path './dist/*' \
-       -o -path './build' -o -path './build/*' \
-       -o -path './.next' -o -path './.next/*' \
-       -o -path './coverage' -o -path './coverage/*' \) -prune \
+  # shellcheck disable=SC2046
+  if find . \( $(exclude_find_prune_args) \) -prune \
     -o -type f -name "$name" -print -quit | grep -q .; then
     return 0
   fi
@@ -442,14 +388,9 @@ RETRIEVAL_STRICT="${VIBE_CODE_AUDIT_RETRIEVAL_STRICT:-0}"
 
 if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
   log "Running agentroot index"
+  # shellcheck disable=SC2046
   if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot index . \
-    --exclude .git \
-    --exclude node_modules \
-    --exclude target \
-    --exclude dist \
-    --exclude build \
-    --exclude .next \
-    --exclude coverage \
+    $(exclude_agentroot_flags) \
     --output "$AGENTROOT_OUT_DIR"; then
     test -d "$AGENTROOT_OUT_DIR"
     if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
@@ -645,7 +586,7 @@ cat > "$MANIFEST_PATH" <<MANIFEST
   "retrieval_mode": "$(json_escape "$RETRIEVAL_MODE")",
   "retrieval_query_ok": $QUERY_OK,
   "retrieval_vsearch_ok": $VSEARCH_OK,
-  "exclude_patterns": [".git", "node_modules", "target", "dist", "build", ".next", "coverage"],
+  "exclude_patterns": $(exclude_dirs_json_array),
   "modes_enabled": $MODES_ENABLED,
   "pagerank_top_k": $TOP_K,
   "budget_mode": "$(json_escape "$MODE")",
