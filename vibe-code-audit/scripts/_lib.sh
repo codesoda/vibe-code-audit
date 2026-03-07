@@ -26,6 +26,49 @@ die() {
 }
 
 # ---------------------------------------------------------------------------
+# File & pattern helpers
+# ---------------------------------------------------------------------------
+
+# json_int_from_file FILE KEY
+#   Extracts the first integer value for KEY from a JSON-like FILE.
+#   Returns the integer on stdout; defaults to 0 if the file is missing,
+#   the key is absent, or the value is non-numeric.
+#   Used by run_index.sh to parse agentroot status.json fields
+#   (document_count, embedded_count). Inline copy remains in run_index.sh
+#   until migration spec 07.
+json_int_from_file() {
+  local file="${1-}"
+  local key="${2-}"
+  local value
+  value="$(sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" "$file" 2>/dev/null | head -n1)" || true
+  if [ -z "$value" ]; then
+    printf '0\n'
+  else
+    printf '%s\n' "$value"
+  fi
+}
+
+# has_pattern_in_files PATTERN [FILE ...]
+#   Returns 0 (true) if PATTERN matches in any of the listed files
+#   (case-insensitive extended regex via grep -Eqi). Skips missing files.
+#   Short-circuits on first match. Returns 1 if no match found.
+#   Used by run_index.sh and run_agentroot_embed.sh for retrieval
+#   diagnostics and error classification. Inline copies remain until
+#   migration specs 07/10.
+has_pattern_in_files() {
+  local pattern="${1-}"
+  shift
+  local file
+  for file in "$@"; do
+    [ -f "$file" ] || continue
+    if grep -Eqi "$pattern" "$file"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # JSON helpers — RFC 8259 §7 compliant string escaping
 # ---------------------------------------------------------------------------
 
