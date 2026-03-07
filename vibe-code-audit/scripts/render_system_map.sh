@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="render_system_map.sh"
+SCRIPT_NAME="render_system_map"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -19,14 +21,6 @@ Behavior:
       SYSTEM_MAP_SKIPPED=1
       SYSTEM_MAP_REASON=<reason>
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
 }
 
 REPORT_PATH=""
