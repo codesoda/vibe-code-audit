@@ -280,39 +280,22 @@ AGENTROOT_DB_PATH="$AGENTROOT_OUT_DIR/index.sqlite"
 export AGENTROOT_DB="$AGENTROOT_DB_PATH"
 log "agentroot db: $AGENTROOT_DB_PATH"
 
-run_agentroot_query_check() {
-  query="$1"
-  out="$2"
+# Unified agentroot probe helper.  Tries --format json first, then plain
+# output, returning 1 only when both attempts fail.
+# Usage: run_agentroot_check <subcommand> [args...] <output_file>
+run_agentroot_check() {
+  local subcmd="$1"; shift
+  local out="${*: -1}"          # last positional = output file
+  local -a args=()
+  # collect everything between subcmd and output file as command args
+  while [ $# -gt 1 ]; do
+    args+=("$1"); shift
+  done
 
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot query "$query" --format json > "$out" 2>&1; then
+  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot "$subcmd" "${args[@]+"${args[@]}"}" --format json > "$out" 2>&1; then
     return 0
   fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot query "$query" > "$out" 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-run_agentroot_status_check() {
-  out="$1"
-
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot status --format json > "$out" 2>&1; then
-    return 0
-  fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot status > "$out" 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-run_agentroot_vsearch_check() {
-  query="$1"
-  out="$2"
-
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot vsearch "$query" --format json > "$out" 2>&1; then
-    return 0
-  fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot vsearch "$query" > "$out" 2>&1; then
+  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot "$subcmd" "${args[@]+"${args[@]}"}" > "$out" 2>&1; then
     return 0
   fi
   return 1
@@ -363,7 +346,7 @@ attempt_agentroot_embed() {
     fi
   fi
 
-  if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
+  if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
     AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
     AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
   else
@@ -404,7 +387,7 @@ if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
     $(exclude_agentroot_flags) \
     --output "$AGENTROOT_OUT_DIR"; then
     test -d "$AGENTROOT_OUT_DIR"
-    if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
+    if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
       AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
       AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
     else
@@ -414,12 +397,12 @@ if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
     attempt_agentroot_embed
 
     log "Running retrieval validation"
-    if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
+    if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
       QUERY_OK=1
     else
       warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
     fi
-    if run_agentroot_vsearch_check "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+    if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
       VSEARCH_OK=1
     else
       warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
@@ -470,7 +453,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot update > "$AGENTROOT_OUT_DIR/update.txt" 2>&1 || \
     die "agentroot update failed (see $AGENTROOT_OUT_DIR/update.txt)"
 
-  run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json" || \
+  run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json" || \
     die "agentroot status failed (see $AGENTROOT_OUT_DIR/status.json)"
   AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
   AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
@@ -487,7 +470,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
     printf '%s\t%s\n' "$fallback_name" '**/*' >> "$COLLECTIONS_TSV"
     AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot update > "$AGENTROOT_OUT_DIR/update_fallback.txt" 2>&1 || \
       die "agentroot fallback update failed (see $AGENTROOT_OUT_DIR/update_fallback.txt)"
-    run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json" || \
+    run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json" || \
       die "agentroot status failed after fallback (see $AGENTROOT_OUT_DIR/status.json)"
     AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
     AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
@@ -498,12 +481,12 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   attempt_agentroot_embed
 
   log "Running retrieval validation"
-  if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
+  if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
     QUERY_OK=1
   else
     warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
   fi
-  if run_agentroot_vsearch_check "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+  if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
     VSEARCH_OK=1
   else
     warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
