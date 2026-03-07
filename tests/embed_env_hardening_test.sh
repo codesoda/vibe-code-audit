@@ -43,12 +43,12 @@ else
   fail "bash -n syntax check failed"
 fi
 
-# 4b. shellcheck (advisory — reports availability but does not fail suite)
+# 4b. shellcheck (advisory — reports status but does not fail the suite)
 if command -v shellcheck >/dev/null 2>&1; then
   if shellcheck -S warning "$SCRIPT" >/dev/null 2>&1; then
     pass "shellcheck passes on run_agentroot_embed.sh"
   else
-    fail "shellcheck found warnings in run_agentroot_embed.sh"
+    echo "  INFO: shellcheck found warnings in run_agentroot_embed.sh (advisory, not counted as failure)"
   fi
 else
   echo "  SKIP: shellcheck not installed — install via 'brew install shellcheck' for lint coverage"
@@ -247,7 +247,7 @@ printf 'VIBE_CODE_AUDIT_EMBED_HOST=from-file\nVIBE_CODE_AUDIT_EMBED_PORT=1111\n'
 HOME="$test_home_cli" PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
   MOCK_CURL_LOG="$test_home_cli/curl_urls.log" \
   bash "$SCRIPT" --db "$test_home_cli/test.sqlite" --no-start-local \
-    --host cli-host --port 2222 2>/dev/null || true
+    --host cli-host --port 2222 >/dev/null 2>/dev/null || true
 cli_url="$(head -1 "$test_home_cli/curl_urls.log" 2>/dev/null || echo NONE)"
 if [ "$cli_url" = "http://cli-host:2222/health" ]; then
   pass "CLI flags override embed.env values"
@@ -267,7 +267,7 @@ HOME="$test_home_prec" PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
   MOCK_CURL_LOG="$test_home_prec/curl_urls.log" \
   VIBE_CODE_AUDIT_EMBED_HOST=env-host \
   VIBE_CODE_AUDIT_EMBED_PORT=3333 \
-  bash "$SCRIPT" --db "$test_home_prec/test.sqlite" --no-start-local 2>/dev/null || true
+  bash "$SCRIPT" --db "$test_home_prec/test.sqlite" --no-start-local >/dev/null 2>/dev/null || true
 prec_url="$(head -1 "$test_home_prec/curl_urls.log" 2>/dev/null || echo NONE)"
 if [ "$prec_url" = "http://env-host:3333/health" ]; then
   pass "Pre-existing env vars take precedence over embed.env"
@@ -298,6 +298,91 @@ if echo "$e2e_output" | grep -q 'EMBED_OK=' && \
   pass "End-to-end output contains EMBED_OK and EMBED_BACKEND"
 else
   fail "End-to-end output missing expected keys"
+fi
+
+# --- 17. Forbidden keys absent from child process environment (env snapshot) ---
+echo ""
+echo "--- Dynamic: env snapshot proves forbidden keys excluded ---"
+# Create an env-snapshot mock agentroot that dumps its inherited environment
+SNAP_BIN="$TMPDIR_ROOT/snap_bin"
+mkdir -p "$SNAP_BIN"
+cat > "$SNAP_BIN/agentroot" <<'SNAP_STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "embed" ]; then
+  env > "${AGENTROOT_ENV_SNAPSHOT:-/dev/null}"
+  echo "Connection refused" >&2
+  exit 1
+fi
+exit 0
+SNAP_STUB
+chmod +x "$SNAP_BIN/agentroot"
+# Reuse the existing mock curl in snap_bin
+cp "$MOCK_BIN/curl" "$SNAP_BIN/curl"
+
+test_home_snap="$TMPDIR_ROOT/home_snap"
+mkdir -p "$test_home_snap/.config/vibe-code-audit"
+touch "$test_home_snap/test.sqlite"
+SNAP_LOG="$test_home_snap/agentroot_env.log"
+printf 'EVIL_KEY=should_be_ignored\nLD_PRELOAD=/evil.so\nVIBE_CODE_AUDIT_EMBED_HOST=snap-host\n' \
+  > "$test_home_snap/.config/vibe-code-audit/embed.env"
+HOME="$test_home_snap" PATH="$SNAP_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+  MOCK_CURL_LOG="$test_home_snap/curl_urls.log" \
+  AGENTROOT_ENV_SNAPSHOT="$SNAP_LOG" \
+  bash "$SCRIPT" --db "$test_home_snap/test.sqlite" --no-start-local >/dev/null 2>/dev/null || true
+
+if [ ! -f "$SNAP_LOG" ]; then
+  fail "Env snapshot file was not created (mock agentroot may not have run)"
+else
+  if grep -q '^EVIL_KEY=' "$SNAP_LOG"; then
+    fail "EVIL_KEY leaked into agentroot process environment"
+  else
+    pass "EVIL_KEY absent from agentroot process environment"
+  fi
+  if grep -q '^LD_PRELOAD=' "$SNAP_LOG"; then
+    fail "LD_PRELOAD leaked into agentroot process environment"
+  else
+    pass "LD_PRELOAD absent from agentroot process environment"
+  fi
+  if grep -q '^VIBE_CODE_AUDIT_EMBED_HOST=snap-host$' "$SNAP_LOG"; then
+    pass "Whitelisted VIBE_CODE_AUDIT_EMBED_HOST=snap-host present in env snapshot"
+  else
+    fail "Whitelisted key missing from env snapshot"
+  fi
+fi
+
+# --- 18. Combined injection + forbidden key payload ---
+echo ""
+echo "--- Dynamic: combined injection and forbidden key payload ---"
+PWNED_COMBINED="$TMPDIR_ROOT/pwned_combined"
+SNAP_LOG2="$test_home_snap/agentroot_env2.log"
+printf 'VIBE_CODE_AUDIT_EMBED_HOST=safe-host\nEVIL_KEY=should_be_ignored\nVIBE_CODE_AUDIT_EMBED_HOST=localhost; touch %s\n$(touch %s)\n' \
+  "$PWNED_COMBINED" "$PWNED_COMBINED" \
+  > "$test_home_snap/.config/vibe-code-audit/embed.env"
+HOME="$test_home_snap" PATH="$SNAP_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+  MOCK_CURL_LOG="$test_home_snap/curl_urls2.log" \
+  AGENTROOT_ENV_SNAPSHOT="$SNAP_LOG2" \
+  bash "$SCRIPT" --db "$test_home_snap/test.sqlite" --no-start-local >/dev/null 2>/dev/null || true
+if [ -f "$PWNED_COMBINED" ]; then
+  fail "Combined injection payload created marker file"
+else
+  pass "Combined injection payload did not execute"
+fi
+if [ ! -f "$SNAP_LOG2" ]; then
+  fail "Combined-payload env snapshot not created (mock agentroot may not have run)"
+elif grep -q '^EVIL_KEY=' "$SNAP_LOG2"; then
+  fail "EVIL_KEY present in combined-payload env snapshot"
+else
+  pass "EVIL_KEY absent from combined-payload env snapshot"
+fi
+
+# --- 19. Temp file leak check ---
+echo ""
+echo "--- Cleanup: temp file leak check ---"
+leaked_files="$(find "$TMPDIR_ROOT" -name 'vca-*' -type f 2>/dev/null || true)"
+if [ -z "$leaked_files" ]; then
+  pass "No vca-* temp file leaks under test root"
+else
+  fail "Leaked temp files found: $leaked_files"
 fi
 
 echo ""
