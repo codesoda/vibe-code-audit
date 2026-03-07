@@ -140,11 +140,58 @@ cleanup() {
   fi
 }
 
-# Source persistent embed config from installer if present
+# Parse persistent embed config from installer if present (safe line-by-line,
+# never sourced as shell code to prevent command injection).
 EMBED_ENV_FILE="$HOME/.config/vibe-code-audit/embed.env"
 if [ -f "$EMBED_ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$EMBED_ENV_FILE"
+  # Snapshot which keys are already set in the environment before parsing,
+  # so pre-existing env vars take precedence but later lines in the file
+  # can still override earlier ones (last-occurrence-wins within the file).
+  _env_preset=""
+  for _env_k in VIBE_CODE_AUDIT_EMBED_MODEL_PATH VIBE_CODE_AUDIT_EMBED_MODEL_URL \
+    VIBE_CODE_AUDIT_EMBED_HOST VIBE_CODE_AUDIT_EMBED_PORT \
+    VIBE_CODE_AUDIT_EMBED_START_LOCAL VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL \
+    VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS VIBE_CODE_AUDIT_EMBED_KEEP_SERVER \
+    VIBE_CODE_AUDIT_EMBED_CTX_SIZE VIBE_CODE_AUDIT_EMBED_BATCH_SIZE \
+    VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE; do
+    if [ -n "${!_env_k+x}" ]; then
+      _env_preset="${_env_preset}${_env_k} "
+    fi
+  done
+  while IFS='=' read -r _env_key _env_value || [ -n "$_env_key" ]; do
+    # Skip blank lines and comments
+    case "$_env_key" in
+      ''|\#*) continue ;;
+    esac
+    # Strip trailing carriage return from value (CRLF files)
+    _env_value="${_env_value%$'\r'}"
+    # Strip one layer of matching surrounding quotes
+    case "$_env_value" in
+      \"*\") _env_value="${_env_value#\"}"; _env_value="${_env_value%\"}" ;;
+      \'*\') _env_value="${_env_value#\'}"; _env_value="${_env_value%\'}" ;;
+    esac
+    # Only accept whitelisted keys; defer to pre-existing env vars
+    case "$_env_key" in
+      VIBE_CODE_AUDIT_EMBED_MODEL_PATH|\
+      VIBE_CODE_AUDIT_EMBED_MODEL_URL|\
+      VIBE_CODE_AUDIT_EMBED_HOST|\
+      VIBE_CODE_AUDIT_EMBED_PORT|\
+      VIBE_CODE_AUDIT_EMBED_START_LOCAL|\
+      VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL|\
+      VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS|\
+      VIBE_CODE_AUDIT_EMBED_KEEP_SERVER|\
+      VIBE_CODE_AUDIT_EMBED_CTX_SIZE|\
+      VIBE_CODE_AUDIT_EMBED_BATCH_SIZE|\
+      VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE)
+        # Skip if this key was already set before file parsing began
+        case "$_env_preset" in
+          *"$_env_key "*) ;;
+          *) export "$_env_key=$_env_value" ;;
+        esac
+        ;;
+    esac
+  done < "$EMBED_ENV_FILE"
+  unset _env_key _env_value _env_k _env_preset
 fi
 
 DB_PATH=""
