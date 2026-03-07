@@ -7,6 +7,7 @@ scripts/build_derived_artifacts.sh
 scripts/build_read_plan.sh
 scripts/render_report_pdf.sh
 scripts/render_system_map.sh
+scripts/_lib.sh
 references/core/process.md
 references/core/inventory.md
 references/core/pattern-mining.md
