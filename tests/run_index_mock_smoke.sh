@@ -323,6 +323,12 @@ run_case() {
   expected_embed_utf8_panic="${20:-0}"
   case_mode="${21:-standard}"
   expected_top_k="${22:-}"
+  skip_read_plan="${23:-0}"
+
+  case "$skip_read_plan" in
+    0|1) ;;
+    *) fail "case $case_name: skip_read_plan must be 0|1, got '$skip_read_plan'" ;;
+  esac
 
   (
     set -euo pipefail
@@ -411,11 +417,17 @@ EOF_RS
     mkdir -p "$output_dir/audit_index"
     printf 'sentinel\n' > "$output_dir/audit_index/.pre_existing_marker"
 
+    skip_flags=""
+    if [ "$skip_read_plan" -eq 1 ]; then
+      skip_flags="--skip-read-plan"
+    fi
+
     run_output="$(
       bash "$RUN_INDEX_SCRIPT" \
         --repo "$repo_dir" \
         --output "$output_dir" \
-        --mode "$case_mode"
+        --mode "$case_mode" \
+        $skip_flags
     )"
 
     resolved_output="$(printf '%s\n' "$run_output" | sed -n 's/^OUTPUT_DIR=//p' | tail -n1)"
@@ -426,9 +438,18 @@ EOF_RS
     assert_nonempty_file "$resolved_output/audit_index/derived/catalog.json"
     assert_nonempty_file "$resolved_output/audit_index/derived/hotspots.json"
     assert_nonempty_file "$resolved_output/audit_index/derived/dup_clusters.md"
-    [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
-      fail "case $case_name: expected read_plan.tsv to exist"
-    assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
+    if [ "$skip_read_plan" -eq 1 ]; then
+      if [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ]; then
+        fail "case $case_name: read_plan.tsv should NOT exist when --skip-read-plan is set"
+      fi
+      if [ -e "$resolved_output/audit_index/derived/read_plan.md" ]; then
+        fail "case $case_name: read_plan.md should NOT exist when --skip-read-plan is set"
+      fi
+    else
+      [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
+        fail "case $case_name: expected read_plan.tsv to exist"
+      assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
+    fi
 
     # Guard: no nested audit_index/audit_index.tmp path produced
     if [ -d "$resolved_output/audit_index/audit_index.tmp" ]; then
@@ -583,6 +604,13 @@ run_case "mode-deep-top-k-350" \
   "root-rust" "23" "unset" "0" "0" "none" \
   "0" "0" "0" "0" "" "0" \
   "deep" "350"
+
+run_case "skip-read-plan-no-artifacts" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "standard" "" "1"
 
 run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag" "flag" "collection" "1" "0" \
