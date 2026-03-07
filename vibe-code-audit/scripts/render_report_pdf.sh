@@ -229,6 +229,15 @@ make_report_without_system_map() {
   ' "$in_report" > "$out_report"
 }
 
+PANDOC_LOG_MAIN=""
+PANDOC_LOG_RETRY=""
+TMP_REPORT_NO_MAP=""
+
+cleanup() {
+  rm -f "$PANDOC_LOG_MAIN" "$PANDOC_LOG_RETRY" "$TMP_REPORT_NO_MAP"
+}
+trap cleanup EXIT INT TERM
+
 log "Rendering PDF with pandoc engine: $PDF_ENGINE"
 PANDOC_LOG_MAIN="$(mktemp "${TMPDIR:-/tmp}/vca-pandoc-main.XXXXXX.log")"
 if render_with_pandoc "$REPORT_PATH_ABS" "$PANDOC_LOG_MAIN"; then
