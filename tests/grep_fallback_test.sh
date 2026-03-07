@@ -133,7 +133,7 @@ fi
 # ---------------------------------------------------------------------------
 
 SCRIPT_EXIT=0
-bash "$SCRIPT" --repo "$MOCK_REPO" --output "$OUTPUT_DIR" --mode fast 2>"$TMPROOT/stderr.log" || SCRIPT_EXIT=$?
+bash "$SCRIPT" --repo "$MOCK_REPO" --output "$OUTPUT_DIR/audit_index.tmp" --mode fast 2>"$TMPROOT/stderr.log" || SCRIPT_EXIT=$?
 
 if [ "$SCRIPT_EXIT" -eq 0 ]; then
   pass "build_read_plan.sh exited 0 in grep fallback mode"
@@ -145,7 +145,7 @@ fi
 # Assert artifacts exist
 # ---------------------------------------------------------------------------
 
-DERIVED="$OUTPUT_DIR/audit_index/derived"
+DERIVED="$OUTPUT_DIR/audit_index.tmp/derived"
 READ_PLAN_TSV="$DERIVED/read_plan.tsv"
 READ_PLAN_MD="$DERIVED/read_plan.md"
 

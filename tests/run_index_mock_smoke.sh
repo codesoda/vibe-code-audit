@@ -393,6 +393,10 @@ EOF_RS
         ;;
     esac
 
+    # [R-006] Pre-create audit_index/ with sentinel to verify it survives the run
+    mkdir -p "$output_dir/audit_index"
+    printf 'sentinel\n' > "$output_dir/audit_index/.pre_existing_marker"
+
     run_output="$(
       bash "$RUN_INDEX_SCRIPT" \
         --repo "$repo_dir" \
@@ -403,14 +407,24 @@ EOF_RS
     resolved_output="$(printf '%s\n' "$run_output" | sed -n 's/^OUTPUT_DIR=//p' | tail -n1)"
     [ -n "$resolved_output" ] || fail "case $case_name: run_index.sh did not emit OUTPUT_DIR"
 
-    manifest="$resolved_output/audit_index/manifest.json"
+    manifest="$resolved_output/audit_index.tmp/manifest.json"
     assert_nonempty_file "$manifest"
-    assert_nonempty_file "$resolved_output/audit_index/derived/catalog.json"
-    assert_nonempty_file "$resolved_output/audit_index/derived/hotspots.json"
-    assert_nonempty_file "$resolved_output/audit_index/derived/dup_clusters.md"
-    [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
+    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/catalog.json"
+    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/hotspots.json"
+    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/dup_clusters.md"
+    [ -e "$resolved_output/audit_index.tmp/derived/read_plan.tsv" ] || \
       fail "case $case_name: expected read_plan.tsv to exist"
-    assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
+    assert_nonempty_file "$resolved_output/audit_index.tmp/derived/read_plan.md"
+
+    # [R-003] Guard: no nested audit_index.tmp/audit_index.tmp path produced
+    if [ -d "$resolved_output/audit_index.tmp/audit_index.tmp" ]; then
+      fail "case $case_name: nested audit_index.tmp/audit_index.tmp directory detected — contract mismatch"
+    fi
+
+    # [R-006] Assert pre-existing audit_index/ is preserved during temp-dir generation
+    if [ ! -f "$resolved_output/audit_index/.pre_existing_marker" ]; then
+      fail "case $case_name: pre-existing audit_index/ was destroyed during audit_index.tmp generation"
+    fi
 
     llmcc_mode_actual="$(json_string "$manifest" "llmcc_mode")"
     [ "$llmcc_mode_actual" = "$expected_llmcc_mode" ] || \
@@ -450,7 +464,7 @@ EOF_RS
         fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
     fi
 
-    catalog="$resolved_output/audit_index/derived/catalog.json"
+    catalog="$resolved_output/audit_index.tmp/derived/catalog.json"
     assert_nonempty_file "$catalog"
 
     catalog_rust="$(json_bool "$catalog" "rust")"
@@ -518,5 +532,26 @@ run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag-depth" "collection-update" \
   "root-rust" "0" "unset" "1" "0" "direct" \
   "1" "1" "1" "1" "bm25-only" "1"
+
+# [R-007] Shellcheck gate for modified pipeline scripts
+PIPELINE_SCRIPTS=(
+  "$ROOT_DIR/vibe-code-audit/scripts/run_index.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/build_derived_artifacts.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/build_read_plan.sh"
+)
+if command -v shellcheck >/dev/null 2>&1; then
+  sc_fail=0
+  for script in "${PIPELINE_SCRIPTS[@]}"; do
+    if ! shellcheck -x -S warning "$script" >/dev/null 2>&1; then
+      printf '[run_index_mock_smoke] WARN: shellcheck found warnings in %s\n' "$(basename "$script")" >&2
+      sc_fail=1
+    fi
+  done
+  if [ "$sc_fail" -eq 0 ]; then
+    printf '[run_index_mock_smoke] PASS: shellcheck (no new warnings)\n'
+  fi
+else
+  printf '[run_index_mock_smoke] SKIP: shellcheck not installed — install via "brew install shellcheck"\n' >&2
+fi
 
 printf '[run_index_mock_smoke] All smoke cases passed.\n'

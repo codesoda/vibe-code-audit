@@ -13,8 +13,8 @@ Usage:
   build_read_plan.sh --repo <repo_path> --output <output_dir> [--mode fast|standard|deep]
 
 Writes:
-  <output_dir>/audit_index/derived/read_plan.tsv
-  <output_dir>/audit_index/derived/read_plan.md
+  <output_dir>/derived/read_plan.tsv
+  <output_dir>/derived/read_plan.md
 
 TSV columns:
   file_path<TAB>match_line<TAB>start_line<TAB>end_line<TAB>signal
@@ -80,7 +80,7 @@ esac
 REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
 OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
-DERIVED_DIR="$OUTPUT_DIR_ABS/audit_index/derived"
+DERIVED_DIR="$OUTPUT_DIR_ABS/derived"
 mkdir -p "$DERIVED_DIR"
 
 RAW_MATCHES="$DERIVED_DIR/.read_plan_matches_raw.tsv"

@@ -13,9 +13,9 @@ Usage:
   build_derived_artifacts.sh --repo <repo_path> --output <output_dir> [--mode <fast|standard|deep>] [--top-k <n>]
 
 Writes:
-  <output_dir>/audit_index/derived/catalog.json
-  <output_dir>/audit_index/derived/hotspots.json
-  <output_dir>/audit_index/derived/dup_clusters.md
+  <output_dir>/derived/catalog.json
+  <output_dir>/derived/hotspots.json
+  <output_dir>/derived/dup_clusters.md
 USAGE
 }
 
@@ -92,7 +92,7 @@ fi
 REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
 OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
-AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
+AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS"
 DERIVED_DIR="$AUDIT_INDEX_DIR/derived"
 mkdir -p "$DERIVED_DIR"
 

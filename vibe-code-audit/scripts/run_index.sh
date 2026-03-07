@@ -22,10 +22,10 @@ Options:
   --help     Show this help
 
 This script writes:
-  <output_dir>/audit_index/
-  <output_dir>/audit_index/derived/catalog.json
-  <output_dir>/audit_index/derived/hotspots.json
-  <output_dir>/audit_index/derived/dup_clusters.md
+  <output_dir>/audit_index.tmp/
+  <output_dir>/audit_index.tmp/derived/catalog.json
+  <output_dir>/audit_index.tmp/derived/hotspots.json
+  <output_dir>/audit_index.tmp/derived/dup_clusters.md
 
 Machine-readable output:
   OUTPUT_DIR=<resolved absolute output dir>
@@ -136,7 +136,7 @@ fi
 
 OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
-AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
+AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index.tmp"
 RUST_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/rust"
 TS_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/ts"
 AGENTROOT_OUT_DIR="$AUDIT_INDEX_DIR/agentroot"
@@ -599,7 +599,7 @@ log "Wrote $MANIFEST_PATH"
 DERIVED_SCRIPT="$SCRIPT_DIR/build_derived_artifacts.sh"
 if [ -x "$DERIVED_SCRIPT" ]; then
   log "Building derived artifacts"
-  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE" --top-k "$TOP_K" \
+  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$AUDIT_INDEX_DIR" --mode "$MODE" --top-k "$TOP_K" \
     --has-rust "$HAS_RUST" --has-ts "$HAS_TS" --has-js "$HAS_JS"
   test -s "$DERIVED_OUT_DIR/catalog.json" || die "catalog.json was not generated"
   test -s "$DERIVED_OUT_DIR/hotspots.json" || die "hotspots.json was not generated"
@@ -612,7 +612,7 @@ if [ "$SKIP_READ_PLAN" -eq 0 ]; then
   READ_PLAN_SCRIPT="$SCRIPT_DIR/build_read_plan.sh"
   if [ -x "$READ_PLAN_SCRIPT" ]; then
     log "Running read plan builder"
-    bash "$READ_PLAN_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE"
+    bash "$READ_PLAN_SCRIPT" --repo "$REPO_PATH_ABS" --output "$AUDIT_INDEX_DIR" --mode "$MODE"
     test -e "$DERIVED_OUT_DIR/read_plan.tsv" || die "read_plan.tsv was not generated"
     test -s "$DERIVED_OUT_DIR/read_plan.md" || die "read_plan.md was not generated"
   else
