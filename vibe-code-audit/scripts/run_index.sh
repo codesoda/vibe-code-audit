@@ -237,7 +237,7 @@ repo_has_file_named() {
 
 HAS_RUST=0
 HAS_TS=0
-HAS_NODE=0
+HAS_JS=0
 if [ -f Cargo.toml ] || repo_has_file_named "Cargo.toml"; then
   HAS_RUST=1
 fi
@@ -245,7 +245,7 @@ if [ -f tsconfig.json ] || repo_has_file_named "tsconfig.json"; then
   HAS_TS=1
 fi
 if [ -f package.json ] || repo_has_file_named "package.json"; then
-  HAS_NODE=1
+  HAS_JS=1
 fi
 
 if [ "$HAS_RUST" -eq 1 ]; then
@@ -428,7 +428,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   if [ "$HAS_RUST" -eq 1 ]; then
     MASKS+=( '**/*.rs' '**/*.toml' )
   fi
-  if [ "$HAS_TS" -eq 1 ] || [ "$HAS_NODE" -eq 1 ]; then
+  if [ "$HAS_TS" -eq 1 ] || [ "$HAS_JS" -eq 1 ]; then
     MASKS+=( '**/*.ts' '**/*.tsx' '**/*.js' '**/*.jsx' '**/*.mjs' '**/*.cjs' '**/*.json' )
   fi
   if [ "${#MASKS[@]}" -eq 0 ]; then
@@ -599,7 +599,8 @@ log "Wrote $MANIFEST_PATH"
 DERIVED_SCRIPT="$SCRIPT_DIR/build_derived_artifacts.sh"
 if [ -x "$DERIVED_SCRIPT" ]; then
   log "Building derived artifacts"
-  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE" --top-k "$TOP_K"
+  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE" --top-k "$TOP_K" \
+    --has-rust "$HAS_RUST" --has-ts "$HAS_TS" --has-js "$HAS_JS"
   test -s "$DERIVED_OUT_DIR/catalog.json" || die "catalog.json was not generated"
   test -s "$DERIVED_OUT_DIR/hotspots.json" || die "hotspots.json was not generated"
   test -s "$DERIVED_OUT_DIR/dup_clusters.md" || die "dup_clusters.md was not generated"

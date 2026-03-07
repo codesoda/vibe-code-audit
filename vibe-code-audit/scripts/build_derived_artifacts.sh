@@ -23,6 +23,9 @@ REPO_PATH=""
 OUTPUT_DIR=""
 MODE="standard"
 TOP_K="0"
+FLAG_HAS_RUST=""
+FLAG_HAS_TS=""
+FLAG_HAS_JS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -44,6 +47,21 @@ while [ $# -gt 0 ]; do
     --top-k)
       [ $# -ge 2 ] || die "--top-k requires a value"
       TOP_K="$2"
+      shift 2
+      ;;
+    --has-rust)
+      [ $# -ge 2 ] || die "--has-rust requires a value"
+      FLAG_HAS_RUST="$2"
+      shift 2
+      ;;
+    --has-ts)
+      [ $# -ge 2 ] || die "--has-ts requires a value"
+      FLAG_HAS_TS="$2"
+      shift 2
+      ;;
+    --has-js)
+      [ $# -ge 2 ] || die "--has-js requires a value"
+      FLAG_HAS_JS="$2"
       shift 2
       ;;
     --help|-h)
@@ -174,9 +192,21 @@ HAS_JS="false"
 HAS_FRONTEND="false"
 WORKSPACE_DETECTED="false"
 
-[ -f "$REPO_PATH_ABS/Cargo.toml" ] && HAS_RUST="true"
-[ -f "$REPO_PATH_ABS/tsconfig.json" ] && HAS_TS="true"
-[ -f "$REPO_PATH_ABS/package.json" ] && HAS_JS="true"
+if [ -n "$FLAG_HAS_RUST" ]; then
+  [ "$FLAG_HAS_RUST" -eq 1 ] 2>/dev/null && HAS_RUST="true"
+else
+  [ -f "$REPO_PATH_ABS/Cargo.toml" ] && HAS_RUST="true"
+fi
+if [ -n "$FLAG_HAS_TS" ]; then
+  [ "$FLAG_HAS_TS" -eq 1 ] 2>/dev/null && HAS_TS="true"
+else
+  [ -f "$REPO_PATH_ABS/tsconfig.json" ] && HAS_TS="true"
+fi
+if [ -n "$FLAG_HAS_JS" ]; then
+  [ "$FLAG_HAS_JS" -eq 1 ] 2>/dev/null && HAS_JS="true"
+else
+  [ -f "$REPO_PATH_ABS/package.json" ] && HAS_JS="true"
+fi
 [ -d "$REPO_PATH_ABS/web/src" ] && HAS_FRONTEND="true"
 
 if [ -f "$REPO_PATH_ABS/Cargo.toml" ] && grep -Eq '^\[workspace\]' "$REPO_PATH_ABS/Cargo.toml"; then

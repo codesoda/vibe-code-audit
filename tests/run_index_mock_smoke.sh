@@ -26,6 +26,17 @@ json_int() {
   fi
 }
 
+json_bool() {
+  file="$1"
+  key="$2"
+  value="$(sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\(true\\).*/\\1/p" "$file" | head -n1)"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value"
+    return
+  fi
+  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\(false\\).*/\\1/p" "$file" | head -n1
+}
+
 assert_nonempty_file() {
   path="$1"
   [ -s "$path" ] || fail "expected non-empty file: $path"
@@ -332,6 +343,14 @@ fn main() {
     println!("nested");
 }
 EOF_RS
+    elif [ "$repo_layout" = "js-only" ]; then
+      mkdir -p "$repo_dir/src"
+      cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-js-repo", "version": "1.0.0"}
+EOF_PKG
+      cat > "$repo_dir/src/index.js" <<'EOF_JS'
+console.log("hello");
+EOF_JS
     else
       mkdir -p "$repo_dir/src"
       cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
@@ -431,6 +450,32 @@ EOF_RS
         fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
     fi
 
+    catalog="$resolved_output/audit_index/derived/catalog.json"
+    assert_nonempty_file "$catalog"
+
+    catalog_rust="$(json_bool "$catalog" "rust")"
+    catalog_ts="$(json_bool "$catalog" "typescript")"
+    catalog_js="$(json_bool "$catalog" "javascript")"
+
+    if [ "$repo_layout" = "nested-rust" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for nested-rust layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for nested-rust layout, got $catalog_ts"
+      [ "$catalog_js" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=false for nested-rust layout, got $catalog_js"
+    elif [ "$repo_layout" = "js-only" ]; then
+      [ "$catalog_rust" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.rust=false for js-only layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for js-only layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for js-only layout, got $catalog_js"
+    elif [ "$repo_layout" = "root-rust" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for root-rust layout, got $catalog_rust"
+    fi
+
     printf '[run_index_mock_smoke] PASS: %s\n' "$case_name"
     rm -rf "$work_dir"
   )
@@ -462,6 +507,11 @@ run_case "auto-embed-opt-out-when-vectors-missing" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "root-rust" "0" "0" "0" "0" "none"
+
+run_case "js-only-repo-stack-flags" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "js-only"
 
 run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag" "flag" "collection" "1" "0" \
