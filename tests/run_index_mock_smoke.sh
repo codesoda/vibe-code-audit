@@ -338,7 +338,7 @@ run_case() {
     output_dir="$work_dir/output"
     bin_dir="$work_dir/bin"
 
-    if [ "$repo_layout" = "nested-rust" ]; then
+    if [ "$repo_layout" = "nested-rust" ] || [ "$repo_layout" = "nested-rust-mixed" ]; then
       mkdir -p "$repo_dir/backend/src"
       cat > "$repo_dir/backend/Cargo.toml" <<'EOF_CARGO'
 [package]
@@ -351,6 +351,11 @@ fn main() {
     println!("nested");
 }
 EOF_RS
+      if [ "$repo_layout" = "nested-rust-mixed" ]; then
+        cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-mixed-repo", "version": "1.0.0"}
+EOF_PKG
+      fi
     elif [ "$repo_layout" = "ts-node" ]; then
       mkdir -p "$repo_dir/src"
       cat > "$repo_dir/tsconfig.json" <<'EOF_TS'
@@ -524,6 +529,13 @@ EOF_RS
         fail "case $case_name: expected catalog stacks.typescript=false for nested-rust layout, got $catalog_ts"
       [ "$catalog_js" = "false" ] || \
         fail "case $case_name: expected catalog stacks.javascript=false for nested-rust layout, got $catalog_js"
+    elif [ "$repo_layout" = "nested-rust-mixed" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for nested-rust-mixed layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for nested-rust-mixed layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for nested-rust-mixed layout, got $catalog_js"
     elif [ "$repo_layout" = "ts-node" ]; then
       [ "$catalog_rust" = "false" ] || \
         fail "case $case_name: expected catalog stacks.rust=false for ts-node layout, got $catalog_rust"
@@ -570,6 +582,11 @@ run_case "nested-rust-workspace-marker" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "nested-rust"
+
+run_case "nested-rust-mixed-with-js" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "nested-rust-mixed"
 
 run_case "auto-embed-default-on-when-vectors-missing" \
   "flag" "flag" "collection" "1" "0" \
