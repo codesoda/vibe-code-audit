@@ -88,7 +88,7 @@ resolve_output_dir() {
     die "resolve_output_dir: cannot create directory: $dir"
   fi
   [ -d "$dir" ] || die "resolve_output_dir: not a directory: $dir"
-  (cd "$dir" && pwd) || die "resolve_output_dir: cannot resolve directory: $dir"
+  (cd "$dir" && pwd -P) || die "resolve_output_dir: cannot resolve directory: $dir"
 }
 
 # ---------------------------------------------------------------------------

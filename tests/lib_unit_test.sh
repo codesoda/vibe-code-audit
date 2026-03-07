@@ -254,6 +254,108 @@ else
   printf '  json_doc: %s\n' "$JSON_DOC" >&2
 fi
 
+# ===========================================================================
+# resolve_output_dir tests
+# ===========================================================================
+
+# Fixture setup: create temp root for all path tests, clean up on exit.
+ROD_TMPDIR="$(mktemp -d)"
+_rod_cleanup() { rm -rf "$ROD_TMPDIR"; }
+trap _rod_cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — absolute path returns same path
+# ---------------------------------------------------------------------------
+ROD_ABS_DIR="$ROD_TMPDIR/abs_test"
+mkdir -p "$ROD_ABS_DIR"
+ACTUAL="$(resolve_output_dir "$ROD_ABS_DIR")"
+# Use pwd -P to get the physical path of our expected value (macOS /tmp -> /private/tmp)
+EXPECTED="$(cd "$ROD_ABS_DIR" && pwd -P)"
+assert_eq "resolve_output_dir absolute path" "$EXPECTED" "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — relative path resolves to absolute
+# ---------------------------------------------------------------------------
+ROD_REL_BASE="$ROD_TMPDIR/rel_base"
+mkdir -p "$ROD_REL_BASE"
+ACTUAL="$(cd "$ROD_REL_BASE" && resolve_output_dir "child/output")"
+EXPECTED="$(cd "$ROD_REL_BASE/child/output" && pwd -P)"
+assert_eq "resolve_output_dir relative path" "$EXPECTED" "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — parent traversal (..) normalizes correctly
+# ---------------------------------------------------------------------------
+ROD_TRAVERSE_DIR="$ROD_TMPDIR/traverse/deep"
+mkdir -p "$ROD_TRAVERSE_DIR"
+ACTUAL="$(resolve_output_dir "$ROD_TRAVERSE_DIR/../deep")"
+EXPECTED="$(cd "$ROD_TRAVERSE_DIR" && pwd -P)"
+assert_eq "resolve_output_dir parent traversal (..)" "$EXPECTED" "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — symlink resolves to physical path
+# Uses pwd -P (Decision B) to return the real directory, not the symlink.
+# ---------------------------------------------------------------------------
+ROD_REAL_DIR="$ROD_TMPDIR/real_target"
+ROD_LINK="$ROD_TMPDIR/sym_link"
+mkdir -p "$ROD_REAL_DIR"
+ln -s "$ROD_REAL_DIR" "$ROD_LINK"
+ACTUAL="$(resolve_output_dir "$ROD_LINK")"
+EXPECTED="$(cd "$ROD_REAL_DIR" && pwd -P)"
+assert_eq "resolve_output_dir symlink resolves to real path" "$EXPECTED" "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# resolve_output_dir contract matrix (Spec 25)
+#
+# resolve_output_dir() uses mkdir -p internally. Its contract is:
+#   SUCCEEDS: path exists           → resolved to canonical absolute path
+#   SUCCEEDS: path does not exist   → created via mkdir -p, then resolved
+#   FAILS:    path is unresolvable  → exits non-zero (e.g. parent is a file)
+#
+# The "non-existent path" case is NOT a failure — it exercises mkdir -p.
+# The failure case is an *unresolvable* path where mkdir -p itself fails.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — creates missing directory (mkdir -p behavior)
+# ---------------------------------------------------------------------------
+ROD_NEW_DIR="$ROD_TMPDIR/new_parent/new_child"
+ACTUAL="$(resolve_output_dir "$ROD_NEW_DIR")"
+EXPECTED="$(cd "$ROD_NEW_DIR" && pwd -P)"
+assert_eq "resolve_output_dir creates missing directory" "$EXPECTED" "$ACTUAL"
+if [ -d "$ROD_NEW_DIR" ]; then
+  pass "resolve_output_dir created directory exists"
+else
+  fail "resolve_output_dir created directory exists"
+fi
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — non-existent deep path is created (mkdir -p)
+# Precondition: path must not exist. Postcondition: created and resolved.
+# This proves the contract: non-existent ≠ failure; unresolvable = failure.
+# ---------------------------------------------------------------------------
+ROD_FRESH_DIR="$ROD_TMPDIR/fresh_nonexistent/deep/nested"
+if [ -d "$ROD_FRESH_DIR" ]; then
+  fail "resolve_output_dir non-existent precondition: directory should not exist yet"
+else
+  pass "resolve_output_dir non-existent precondition: directory does not exist yet"
+fi
+ACTUAL="$(resolve_output_dir "$ROD_FRESH_DIR")"
+EXPECTED="$(cd "$ROD_FRESH_DIR" && pwd -P)"
+assert_eq "resolve_output_dir non-existent path created and resolved" "$EXPECTED" "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: resolve_output_dir — unresolvable path (file-as-parent) fails
+# mkdir -p cannot create a child under a regular file → non-zero exit.
+# This is the contract failure case (not merely "non-existent").
+# ---------------------------------------------------------------------------
+ROD_BLOCKER="$ROD_TMPDIR/blocker_file"
+touch "$ROD_BLOCKER"
+if _rod_out="$(resolve_output_dir "$ROD_BLOCKER/child" 2>/dev/null)"; then
+  fail "resolve_output_dir unresolvable path should fail"
+else
+  pass "resolve_output_dir unresolvable path exits non-zero"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
