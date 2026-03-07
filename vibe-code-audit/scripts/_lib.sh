@@ -69,6 +69,31 @@ has_pattern_in_files() {
 }
 
 # ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+# resolve_output_dir PATH
+#   Resolves PATH to a canonical absolute directory path.
+#   Creates the directory (mkdir -p) if it doesn't exist, matching the
+#   inline OUTPUT_DIR_ABS resolution in run_index.sh, build_derived_artifacts.sh,
+#   and build_read_plan.sh.
+#   For absolute paths (starting with /): creates and canonicalizes directly.
+#   For relative paths: resolves relative to the caller's working directory.
+#     Callers must cd to the appropriate base (e.g., REPO_PATH_ABS) before
+#     invoking for relative paths.
+#   Returns the canonical absolute path on stdout via cd + pwd.
+#   Dies if the path cannot be created, is not a directory, or cannot be resolved.
+resolve_output_dir() {
+  local dir="${1-}"
+  [ -n "$dir" ] || die "resolve_output_dir: path argument is required"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    die "resolve_output_dir: cannot create directory: $dir"
+  fi
+  [ -d "$dir" ] || die "resolve_output_dir: not a directory: $dir"
+  (cd "$dir" && pwd) || die "resolve_output_dir: cannot resolve directory: $dir"
+}
+
+# ---------------------------------------------------------------------------
 # JSON helpers — RFC 8259 §7 compliant string escaping
 # ---------------------------------------------------------------------------
 
