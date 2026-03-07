@@ -141,6 +141,119 @@ for dir in .git node_modules target dist build .next coverage; do
   fi
 done
 
+# ===========================================================================
+# json_escape tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — newline
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'hello\nworld')"
+assert_eq "json_escape newline" 'hello\nworld' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — tab
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'hello\tworld')"
+assert_eq "json_escape tab" 'hello\tworld' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — carriage return
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'hello\rworld')"
+assert_eq "json_escape carriage return" 'hello\rworld' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — double quote
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape 'say "hello"')"
+assert_eq "json_escape double quote" 'say \"hello\"' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — backslash
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape 'back\slash')"
+assert_eq "json_escape backslash" 'back\\slash' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — backspace (0x08)
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'a\bb')"
+assert_eq "json_escape backspace" 'a\bb' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — form feed (0x0c)
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'a\fb')"
+assert_eq "json_escape form feed" 'a\fb' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — empty input returns empty output
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape '')"
+assert_eq "json_escape empty input" '' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — plain ASCII passes through unchanged
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape 'hello world 123')"
+assert_eq "json_escape plain ASCII" 'hello world 123' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — control characters use \uXXXX encoding
+# Representative controls: SOH (0x01), STX (0x02), BEL (0x07), ESC (0x1b)
+# Note: NUL (0x00) cannot be passed via bash variables; this is a known
+# shell limitation documented in _lib.sh. NUL handling is correct in the
+# byte-stream path but untestable via $1 argument passing.
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'\x01')"
+assert_eq "json_escape SOH (0x01)" '\u0001' "$ACTUAL"
+
+ACTUAL="$(json_escape $'\x02')"
+assert_eq "json_escape STX (0x02)" '\u0002' "$ACTUAL"
+
+ACTUAL="$(json_escape $'\x07')"
+assert_eq "json_escape BEL (0x07)" '\u0007' "$ACTUAL"
+
+ACTUAL="$(json_escape $'\x1b')"
+assert_eq "json_escape ESC (0x1b)" '\u001b' "$ACTUAL"
+
+ACTUAL="$(json_escape $'\x1f')"
+assert_eq "json_escape US (0x1f)" '\u001f' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — mixed control chars in a single string
+# ---------------------------------------------------------------------------
+ACTUAL="$(json_escape $'line1\nline2\ttab\r\n')"
+assert_eq "json_escape mixed controls" 'line1\nline2\ttab\r\n' "$ACTUAL"
+
+# ---------------------------------------------------------------------------
+# Test: json_escape — version string with newline produces valid JSON
+# Validates that escaped output can be safely wrapped in JSON quotes
+# without embedded raw control bytes. Uses shell-only structural check
+# (no jq dependency).
+# ---------------------------------------------------------------------------
+VERSION=$'1.2.3\n'
+ESCAPED="$(json_escape "$VERSION")"
+JSON_DOC="{\"version\":\"${ESCAPED}\"}"
+
+# Structural check: no raw control bytes remain in the JSON string.
+# Uses od to detect any byte 0x00-0x1f in the output (portable, no grep -P).
+RAW_CTRL_COUNT="$(printf '%s' "$JSON_DOC" | LC_ALL=C od -An -tx1 | tr ' ' '\n' | grep -cE '^(0[0-9a-f]|1[0-9a-f])$' || true)"
+if [ "$RAW_CTRL_COUNT" -eq 0 ]; then
+  pass "json_escape version string: no raw control bytes"
+else
+  fail "json_escape version string: raw control bytes in JSON output (found $RAW_CTRL_COUNT)"
+fi
+
+# Structural check: JSON doc matches basic object pattern
+if printf '%s' "$JSON_DOC" | grep -qE '^\{"version":"[^"]*"\}$'; then
+  pass "json_escape version string: valid JSON structure"
+else
+  fail "json_escape version string: valid JSON structure"
+  printf '  json_doc: %s\n' "$JSON_DOC" >&2
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
