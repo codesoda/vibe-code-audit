@@ -358,6 +358,31 @@ attempt_agentroot_embed() {
   fi
 }
 
+# Shared embed-and-validate seam for both agentroot mode paths.
+# Runs: status refresh (warn-only) → embed attempt → query + vsearch probes.
+run_embed_and_validate() {
+  if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
+    AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
+    AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
+  else
+    warn "agentroot status check failed (see $AGENTROOT_OUT_DIR/status.json)"
+  fi
+
+  attempt_agentroot_embed
+
+  log "Running retrieval validation"
+  if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
+    QUERY_OK=1
+  else
+    warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
+  fi
+  if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+    VSEARCH_OK=1
+  else
+    warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
+  fi
+}
+
 # agentroot compatibility: older builds expose `index`; newer builds use
 # collection add + update.
 if agentroot index --help >/dev/null 2>&1; then
@@ -387,26 +412,7 @@ if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
     $(exclude_agentroot_flags) \
     --output "$AGENTROOT_OUT_DIR"; then
     test -d "$AGENTROOT_OUT_DIR"
-    if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
-      AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
-      AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
-    else
-      warn "agentroot status check failed (see $AGENTROOT_OUT_DIR/status.json)"
-    fi
-
-    attempt_agentroot_embed
-
-    log "Running retrieval validation"
-    if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
-      QUERY_OK=1
-    else
-      warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
-    fi
-    if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
-      VSEARCH_OK=1
-    else
-      warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
-    fi
+    run_embed_and_validate
   else
     warn "agentroot index-subcommand mode failed; falling back to collection-update mode"
     AGENTROOT_MODE="collection-update"
@@ -478,19 +484,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
 
   [ "$AGENTROOT_DOC_COUNT" -gt 0 ] || die "agentroot indexed zero documents after fallback"
 
-  attempt_agentroot_embed
-
-  log "Running retrieval validation"
-  if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
-    QUERY_OK=1
-  else
-    warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
-  fi
-  if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
-    VSEARCH_OK=1
-  else
-    warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
-  fi
+  run_embed_and_validate
 fi
 
 test -s "$AGENTROOT_OUT_DIR/query_check.txt" || die "query_check.txt was not written"
