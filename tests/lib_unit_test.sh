@@ -141,6 +141,93 @@ for dir in .git node_modules target dist build .next coverage; do
   fi
 done
 
+# ---------------------------------------------------------------------------
+# Per-directory membership checks: agentroot flags
+# ---------------------------------------------------------------------------
+for dir in .git node_modules target dist build .next coverage; do
+  if printf '%s' "$ACTUAL_AGENT" | grep -q -- "--exclude $dir"; then
+    pass "agentroot flags includes $dir"
+  else
+    fail "agentroot flags includes $dir"
+    printf '  actual: %s\n' "$ACTUAL_AGENT" >&2
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Per-directory membership checks: rg globs
+# ---------------------------------------------------------------------------
+for dir in .git node_modules target dist build .next coverage; do
+  if printf '%s' "$ACTUAL_RG" | grep -qF -- "--glob '!${dir}/**'"; then
+    pass "rg globs includes $dir"
+  else
+    fail "rg globs includes $dir"
+    printf '  actual: %s\n' "$ACTUAL_RG" >&2
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Per-directory membership checks: JSON array
+# ---------------------------------------------------------------------------
+for dir in .git node_modules target dist build .next coverage; do
+  if printf '%s' "$ACTUAL_JSON" | grep -qF "\"$dir\""; then
+    pass "json array includes $dir"
+  else
+    fail "json array includes $dir"
+    printf '  actual: %s\n' "$ACTUAL_JSON" >&2
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# JSON element count: exactly 7 quoted entries
+# ---------------------------------------------------------------------------
+JSON_ELEM_COUNT="$(printf '%s' "$ACTUAL_JSON" | grep -o '"[^"]*"' | wc -l | tr -d ' ')"
+assert_eq "json array has exactly 7 elements" "7" "$JSON_ELEM_COUNT"
+
+# ---------------------------------------------------------------------------
+# Duplicate entry guards: no directory appears more than once per helper
+# ---------------------------------------------------------------------------
+_count_occurrences() {
+  local haystack="$1" needle="$2"
+  local count=0 tmp="$haystack"
+  while [ "${tmp#*"$needle"}" != "$tmp" ]; do
+    count=$((count + 1))
+    tmp="${tmp#*"$needle"}"
+  done
+  printf '%d' "$count"
+}
+
+_check_no_duplicates() {
+  local label="$1" output="$2" needle_fmt="$3"
+  local dir count
+  for dir in .git node_modules target dist build .next coverage; do
+    # shellcheck disable=SC2059
+    needle="$(printf -- "$needle_fmt" "$dir")"
+    count="$(_count_occurrences "$output" "$needle")"
+    if [ "$count" -gt 1 ]; then
+      fail "$label duplicate entry: $dir appears $count times"
+      return
+    fi
+  done
+  pass "$label no duplicate entries"
+}
+
+_check_no_duplicates "find prune" "$ACTUAL_FIND" "-name %s"
+_check_no_duplicates "agentroot flags" "$ACTUAL_AGENT" "--exclude %s"
+_check_no_duplicates "rg globs" "$ACTUAL_RG" "'!%s/**'"
+_check_no_duplicates "json array" "$ACTUAL_JSON" '"%s"'
+
+# ---------------------------------------------------------------------------
+# Non-empty output guards: ensure no helper returns empty string
+# ---------------------------------------------------------------------------
+for _helper_name in ACTUAL_FIND ACTUAL_AGENT ACTUAL_RG ACTUAL_JSON; do
+  eval "_helper_val=\"\${$_helper_name}\""
+  if [ -z "$_helper_val" ]; then
+    fail "$_helper_name is unexpectedly empty"
+  else
+    pass "$_helper_name is non-empty"
+  fi
+done
+
 # ===========================================================================
 # json_escape tests
 # ===========================================================================
