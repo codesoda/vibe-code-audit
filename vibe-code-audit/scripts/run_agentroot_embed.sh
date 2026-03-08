@@ -142,7 +142,7 @@ cleanup() {
 
 # Parse persistent embed config from installer if present (safe line-by-line,
 # never sourced as shell code to prevent command injection).
-EMBED_ENV_FILE="$HOME/.config/vibe-code-audit/embed.env"
+# EMBED_ENV_FILE is defined in _lib.sh; use that canonical constant.
 if [ -f "$EMBED_ENV_FILE" ]; then
   # Snapshot which keys are already set in the environment before parsing,
   # so pre-existing env vars take precedence but later lines in the file

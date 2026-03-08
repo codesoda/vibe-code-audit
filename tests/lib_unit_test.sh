@@ -1,34 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_NAME="lib_unit_test"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 LIB_SH="$ROOT_DIR/vibe-code-audit/scripts/_lib.sh"
-
-PASS=0
-FAIL=0
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  printf 'PASS: %s\n' "$*"
-  PASS=$((PASS + 1))
-}
-
-assert_eq() {
-  local label="$1"
-  local expected="$2"
-  local actual="$3"
-  if [ "$expected" = "$actual" ]; then
-    pass "$label"
-  else
-    fail "$label"
-    printf '  expected: %s\n' "$expected" >&2
-    printf '  actual:   %s\n' "$actual" >&2
-  fi
-}
 
 # Source _lib.sh (requires SCRIPT_NAME)
 SCRIPT_NAME="lib_unit_test"
@@ -443,10 +420,25 @@ else
   pass "resolve_output_dir unresolvable path exits non-zero"
 fi
 
+# ===========================================================================
+# EMBED_ENV_FILE constant tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test: EMBED_ENV_FILE has correct default value
+# ---------------------------------------------------------------------------
+assert_eq "EMBED_ENV_FILE default value" "$HOME/.config/vibe-code-audit/embed.env" "$EMBED_ENV_FILE"
+
+# ---------------------------------------------------------------------------
+# Test: EMBED_ENV_FILE can be overridden via environment
+# ---------------------------------------------------------------------------
+EMBED_ENV_FILE="/tmp/custom/embed.env"
+# Re-source to verify the variable respects environment override
+SCRIPT_NAME="lib_unit_test"
+. "$LIB_SH"
+assert_eq "EMBED_ENV_FILE override" "/tmp/custom/embed.env" "$EMBED_ENV_FILE"
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
-printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+print_results

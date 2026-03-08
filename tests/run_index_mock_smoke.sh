@@ -679,11 +679,15 @@ EOF_CARGO
   rm -rf "$work_dir"
 )
 
-# Shellcheck gate for modified pipeline scripts
+# Shellcheck gate for pipeline scripts and shared libraries
 PIPELINE_SCRIPTS=(
+  "$ROOT_DIR/vibe-code-audit/scripts/_lib.sh"
   "$ROOT_DIR/vibe-code-audit/scripts/run_index.sh"
   "$ROOT_DIR/vibe-code-audit/scripts/build_derived_artifacts.sh"
   "$ROOT_DIR/vibe-code-audit/scripts/build_read_plan.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/run_agentroot_embed.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/render_system_map.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/render_report_pdf.sh"
 )
 if command -v shellcheck >/dev/null 2>&1; then
   sc_fail=0

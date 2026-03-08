@@ -8,37 +8,14 @@ set -euo pipefail
 #   - Any prior audit_index/ is untouched
 #   - After a successful run, audit_index/ has fresh content and audit_index.tmp/ is absent
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_NAME="atomic_index_midrun"
+FILE_COUNTERS=1
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 RUN_INDEX_SCRIPT="$ROOT_DIR/vibe-code-audit/scripts/run_index.sh"
 
-TEST_TMPDIR=""
-cleanup() {
-  if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
-    rm -rf "$TEST_TMPDIR"
-  fi
-}
-trap cleanup EXIT INT TERM
-
-TEST_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/vca-atomic-idx-test.XXXXXX")"
-
-PASS_FILE="$TEST_TMPDIR/.pass_count"
-FAIL_FILE="$TEST_TMPDIR/.fail_count"
-printf '0\n' > "$PASS_FILE"
-printf '0\n' > "$FAIL_FILE"
-
-pass() {
-  local c
-  c="$(cat "$PASS_FILE")"
-  printf '%d\n' "$((c + 1))" > "$PASS_FILE"
-  printf '[atomic_index_midrun] PASS: %s\n' "$1"
-}
-
-fail() {
-  local c
-  c="$(cat "$FAIL_FILE")"
-  printf '%d\n' "$((c + 1))" > "$FAIL_FILE"
-  printf '[atomic_index_midrun] FAIL: %s\n' "$1" >&2
-}
+setup_tmproot
 
 # --- Helper: create mock binaries ---
 
@@ -178,7 +155,7 @@ EOF
 (
   set -euo pipefail
 
-  work_dir="$TEST_TMPDIR/case-failure"
+  work_dir="$TMPROOT/case-failure"
   repo_dir="$work_dir/repo"
   output_dir="$work_dir/output"
   bin_dir="$work_dir/bin"
@@ -245,7 +222,7 @@ EOF
 (
   set -euo pipefail
 
-  work_dir="$TEST_TMPDIR/case-success"
+  work_dir="$TMPROOT/case-success"
   repo_dir="$work_dir/repo"
   output_dir="$work_dir/output"
   bin_dir="$work_dir/bin"
@@ -318,7 +295,7 @@ EOF
 (
   set -euo pipefail
 
-  work_dir="$TEST_TMPDIR/case-success-replace"
+  work_dir="$TMPROOT/case-success-replace"
   repo_dir="$work_dir/repo"
   output_dir="$work_dir/output"
   bin_dir="$work_dir/bin"
@@ -373,9 +350,4 @@ EOF
 # Summary
 # ============================================================
 
-PASS="$(cat "$PASS_FILE")"
-FAIL="$(cat "$FAIL_FILE")"
-printf '\n[atomic_index_midrun] Results: %d passed, %d failed\n' "$PASS" "$FAIL"
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+print_results

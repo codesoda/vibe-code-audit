@@ -50,12 +50,7 @@ Environment:
 USAGE
 }
 
-kv_from_file() {
-  file="$1"
-  key="$2"
-  value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
-  printf '%s\n' "$value"
-}
+# kv_from_file() is now in _lib.sh
 
 REPO_PATH=""
 OUTPUT_DIR=""
@@ -236,15 +231,7 @@ run_llmcc_graph() {
 
 pushd "$REPO_PATH_ABS" >/dev/null
 
-repo_has_file_named() {
-  name="$1"
-  # shellcheck disable=SC2046
-  if find . \( $(exclude_find_prune_args) \) -prune \
-    -o -type f -name "$name" -print -quit | grep -q .; then
-    return 0
-  fi
-  return 1
-}
+# repo_has_file_named() is now in _lib.sh
 
 HAS_RUST=0
 HAS_TS=0

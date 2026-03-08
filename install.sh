@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+# NOTE: This is a standalone POSIX sh installer that does NOT source _lib.sh.
+# It intentionally defines its own output helpers (info, dim, ok, warn, die)
+# for colored terminal output. Changes to logging in _lib.sh must be
+# manually reconciled here if the installer's output contract changes.
+
 SKILL_NAME="vibe-code-audit"
 REPO_OWNER="${VIBE_CODE_AUDIT_REPO_OWNER:-codesoda}"
 REPO_NAME="${VIBE_CODE_AUDIT_REPO_NAME:-vibe-code-audit}"

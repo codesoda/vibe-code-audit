@@ -7,38 +7,18 @@ set -euo pipefail
 #   2. Emits SYSTEM_MAP_SKIPPED=1 and SYSTEM_MAP_REASON=graphviz_missing
 #   3. No temp file leaks under controlled TMPDIR
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_NAME="render_system_map_smoke"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 SCRIPT="$ROOT_DIR/vibe-code-audit/scripts/render_system_map.sh"
-
-PASS=0
-FAIL=0
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  printf 'PASS: %s\n' "$*"
-  PASS=$((PASS + 1))
-}
 
 # ---------------------------------------------------------------------------
 # Setup: temp dirs, PATH hiding, cleanup trap
 # ---------------------------------------------------------------------------
 
 ORIG_PATH="$PATH"
-TMPROOT=""
-
-cleanup() {
-  PATH="$ORIG_PATH"
-  if [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ]; then
-    rm -rf "$TMPROOT"
-  fi
-}
-trap cleanup EXIT INT TERM
-
-TMPROOT="$(mktemp -d)"
+setup_tmproot
 FIXTURE_DIR="$TMPROOT/fixture"
 TEST_TMPDIR="$TMPROOT/tmpdir"
 mkdir -p "$FIXTURE_DIR" "$TEST_TMPDIR"
@@ -64,7 +44,7 @@ if [ -f "$SCRIPT" ]; then
   pass "render_system_map.sh exists"
 else
   fail "render_system_map.sh not found at $SCRIPT"
-  printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
+  print_results
   exit 1
 fi
 
@@ -78,22 +58,7 @@ fi
 # 2. Build filtered PATH that excludes dot
 # ---------------------------------------------------------------------------
 
-FILTERED_PATH=""
-IFS=':'
-for segment in $ORIG_PATH; do
-  if [ -z "$segment" ]; then
-    continue
-  fi
-  if [ -x "$segment/dot" ]; then
-    continue
-  fi
-  if [ -n "$FILTERED_PATH" ]; then
-    FILTERED_PATH="$FILTERED_PATH:$segment"
-  else
-    FILTERED_PATH="$segment"
-  fi
-done
-unset IFS
+build_filtered_path "dot"
 
 # Verify dot is hidden
 if ! PATH="$FILTERED_PATH" command -v dot >/dev/null 2>&1; then
@@ -143,11 +108,7 @@ if [ -s "$STDERR_FILE" ]; then
   STDERR_CONTENT="$(cat "$STDERR_FILE")"
 fi
 
-if echo "$STDERR_CONTENT" | grep -Eiq 'unbound variable|syntax error|segmentation fault|core dumped|panic'; then
-  fail "stderr contains crash diagnostic: $(echo "$STDERR_CONTENT" | grep -Ei 'unbound variable|syntax error|segmentation fault|core dumped|panic' | head -1)"
-else
-  pass "no crash diagnostics in stderr"
-fi
+assert_no_crash_diagnostics "$STDERR_CONTENT"
 
 # ---------------------------------------------------------------------------
 # 5. Assert skip contract signals
@@ -202,5 +163,4 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+print_results
