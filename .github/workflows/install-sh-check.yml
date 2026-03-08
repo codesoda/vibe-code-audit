@@ -1,6 +1,8 @@
 name: Check install.sh
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 jobs:
