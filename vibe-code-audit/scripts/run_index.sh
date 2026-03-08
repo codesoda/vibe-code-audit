@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="run_index.sh"
+SCRIPT_NAME="run_index"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -20,10 +22,10 @@ Options:
   --help     Show this help
 
 This script writes:
-  <output_dir>/audit_index/
-  <output_dir>/audit_index/derived/catalog.json
-  <output_dir>/audit_index/derived/hotspots.json
-  <output_dir>/audit_index/derived/dup_clusters.md
+  <output_dir>/audit_index.tmp/
+  <output_dir>/audit_index.tmp/derived/catalog.json
+  <output_dir>/audit_index.tmp/derived/hotspots.json
+  <output_dir>/audit_index.tmp/derived/dup_clusters.md
 
 Machine-readable output:
   OUTPUT_DIR=<resolved absolute output dir>
@@ -48,51 +50,11 @@ Environment:
 USAGE
 }
 
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
-
-json_int_from_file() {
-  file="$1"
-  key="$2"
-  value="$(sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" "$file" | head -n1)"
-  if [ -z "$value" ]; then
-    printf '0\n'
-  else
-    printf '%s\n' "$value"
-  fi
-}
-
 kv_from_file() {
   file="$1"
   key="$2"
   value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
   printf '%s\n' "$value"
-}
-
-has_pattern_in_files() {
-  pattern="$1"
-  shift
-  for file in "$@"; do
-    [ -f "$file" ] || continue
-    if grep -Eqi "$pattern" "$file"; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 REPO_PATH=""
@@ -172,19 +134,9 @@ if [ -z "$OUTPUT_DIR" ]; then
   OUTPUT_DIR="$REPO_PATH_ABS/vibe-code-audit/$TIMESTAMP"
 fi
 
-OUTPUT_DIR_ABS="$OUTPUT_DIR"
-case "$OUTPUT_DIR_ABS" in
-  /*)
-    mkdir -p "$OUTPUT_DIR_ABS"
-    OUTPUT_DIR_ABS="$(cd "$OUTPUT_DIR_ABS" && pwd)"
-    ;;
-  *)
-    mkdir -p "$REPO_PATH_ABS/$OUTPUT_DIR_ABS"
-    OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS/$OUTPUT_DIR_ABS" && pwd)"
-    ;;
-esac
+OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
-AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
+AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index.tmp"
 RUST_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/rust"
 TS_OUT_DIR="$AUDIT_INDEX_DIR/llmcc/ts"
 AGENTROOT_OUT_DIR="$AUDIT_INDEX_DIR/agentroot"
@@ -197,7 +149,18 @@ cleanup_embed_server() {
     EMBED_SERVER_PID=""
   fi
 }
-trap cleanup_embed_server EXIT
+
+cleanup_audit_index_tmp() {
+  if [ -n "${AUDIT_INDEX_DIR:-}" ] && [ -d "$AUDIT_INDEX_DIR" ]; then
+    rm -rf "$AUDIT_INDEX_DIR"
+  fi
+}
+
+cleanup_all() {
+  cleanup_embed_server
+  cleanup_audit_index_tmp
+}
+trap cleanup_all EXIT INT TERM
 
 log "repo: $REPO_PATH_ABS"
 log "output: $OUTPUT_DIR_ABS"
@@ -275,14 +238,8 @@ pushd "$REPO_PATH_ABS" >/dev/null
 
 repo_has_file_named() {
   name="$1"
-  if find . \
-    \( -path './.git' -o -path './.git/*' \
-       -o -path './target' -o -path './target/*' \
-       -o -path './node_modules' -o -path './node_modules/*' \
-       -o -path './dist' -o -path './dist/*' \
-       -o -path './build' -o -path './build/*' \
-       -o -path './.next' -o -path './.next/*' \
-       -o -path './coverage' -o -path './coverage/*' \) -prune \
+  # shellcheck disable=SC2046
+  if find . \( $(exclude_find_prune_args) \) -prune \
     -o -type f -name "$name" -print -quit | grep -q .; then
     return 0
   fi
@@ -291,7 +248,7 @@ repo_has_file_named() {
 
 HAS_RUST=0
 HAS_TS=0
-HAS_NODE=0
+HAS_JS=0
 if [ -f Cargo.toml ] || repo_has_file_named "Cargo.toml"; then
   HAS_RUST=1
 fi
@@ -299,7 +256,7 @@ if [ -f tsconfig.json ] || repo_has_file_named "tsconfig.json"; then
   HAS_TS=1
 fi
 if [ -f package.json ] || repo_has_file_named "package.json"; then
-  HAS_NODE=1
+  HAS_JS=1
 fi
 
 if [ "$HAS_RUST" -eq 1 ]; then
@@ -323,39 +280,22 @@ AGENTROOT_DB_PATH="$AGENTROOT_OUT_DIR/index.sqlite"
 export AGENTROOT_DB="$AGENTROOT_DB_PATH"
 log "agentroot db: $AGENTROOT_DB_PATH"
 
-run_agentroot_query_check() {
-  query="$1"
-  out="$2"
+# Unified agentroot probe helper.  Tries --format json first, then plain
+# output, returning 1 only when both attempts fail.
+# Usage: run_agentroot_check <subcommand> [args...] <output_file>
+run_agentroot_check() {
+  local subcmd="$1"; shift
+  local out="${*: -1}"          # last positional = output file
+  local -a args=()
+  # collect everything between subcmd and output file as command args
+  while [ $# -gt 1 ]; do
+    args+=("$1"); shift
+  done
 
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot query "$query" --format json > "$out" 2>&1; then
+  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot "$subcmd" "${args[@]+"${args[@]}"}" --format json > "$out" 2>&1; then
     return 0
   fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot query "$query" > "$out" 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-run_agentroot_status_check() {
-  out="$1"
-
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot status --format json > "$out" 2>&1; then
-    return 0
-  fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot status > "$out" 2>&1; then
-    return 0
-  fi
-  return 1
-}
-
-run_agentroot_vsearch_check() {
-  query="$1"
-  out="$2"
-
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot vsearch "$query" --format json > "$out" 2>&1; then
-    return 0
-  fi
-  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot vsearch "$query" > "$out" 2>&1; then
+  if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot "$subcmd" "${args[@]+"${args[@]}"}" > "$out" 2>&1; then
     return 0
   fi
   return 1
@@ -406,7 +346,7 @@ attempt_agentroot_embed() {
     fi
   fi
 
-  if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
+  if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
     AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
     AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
   else
@@ -415,6 +355,31 @@ attempt_agentroot_embed() {
 
   if [ "$EMBED_UTF8_PANIC" -eq 1 ]; then
     warn "Detected agentroot UTF-8 chunking panic; forcing BM25-only fallback behavior"
+  fi
+}
+
+# Shared embed-and-validate seam for both agentroot mode paths.
+# Runs: status refresh (warn-only) → embed attempt → query + vsearch probes.
+run_embed_and_validate() {
+  if run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json"; then
+    AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
+    AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
+  else
+    warn "agentroot status check failed (see $AGENTROOT_OUT_DIR/status.json)"
+  fi
+
+  attempt_agentroot_embed
+
+  log "Running retrieval validation"
+  if run_agentroot_check query "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
+    QUERY_OK=1
+  else
+    warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
+  fi
+  if run_agentroot_check vsearch "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
+    VSEARCH_OK=1
+  else
+    warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
   fi
 }
 
@@ -442,36 +407,12 @@ RETRIEVAL_STRICT="${VIBE_CODE_AUDIT_RETRIEVAL_STRICT:-0}"
 
 if [ "$AGENTROOT_MODE" = "index-subcommand" ]; then
   log "Running agentroot index"
+  # shellcheck disable=SC2046
   if AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot index . \
-    --exclude .git \
-    --exclude node_modules \
-    --exclude target \
-    --exclude dist \
-    --exclude build \
-    --exclude .next \
-    --exclude coverage \
+    $(exclude_agentroot_flags) \
     --output "$AGENTROOT_OUT_DIR"; then
     test -d "$AGENTROOT_OUT_DIR"
-    if run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json"; then
-      AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
-      AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
-    else
-      warn "agentroot status check failed (see $AGENTROOT_OUT_DIR/status.json)"
-    fi
-
-    attempt_agentroot_embed
-
-    log "Running retrieval validation"
-    if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
-      QUERY_OK=1
-    else
-      warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
-    fi
-    if run_agentroot_vsearch_check "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
-      VSEARCH_OK=1
-    else
-      warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
-    fi
+    run_embed_and_validate
   else
     warn "agentroot index-subcommand mode failed; falling back to collection-update mode"
     AGENTROOT_MODE="collection-update"
@@ -487,7 +428,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   if [ "$HAS_RUST" -eq 1 ]; then
     MASKS+=( '**/*.rs' '**/*.toml' )
   fi
-  if [ "$HAS_TS" -eq 1 ] || [ "$HAS_NODE" -eq 1 ]; then
+  if [ "$HAS_TS" -eq 1 ] || [ "$HAS_JS" -eq 1 ]; then
     MASKS+=( '**/*.ts' '**/*.tsx' '**/*.js' '**/*.jsx' '**/*.mjs' '**/*.cjs' '**/*.json' )
   fi
   if [ "${#MASKS[@]}" -eq 0 ]; then
@@ -518,7 +459,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
   AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot update > "$AGENTROOT_OUT_DIR/update.txt" 2>&1 || \
     die "agentroot update failed (see $AGENTROOT_OUT_DIR/update.txt)"
 
-  run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json" || \
+  run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json" || \
     die "agentroot status failed (see $AGENTROOT_OUT_DIR/status.json)"
   AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
   AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
@@ -535,7 +476,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
     printf '%s\t%s\n' "$fallback_name" '**/*' >> "$COLLECTIONS_TSV"
     AGENTROOT_DB="$AGENTROOT_DB_PATH" agentroot update > "$AGENTROOT_OUT_DIR/update_fallback.txt" 2>&1 || \
       die "agentroot fallback update failed (see $AGENTROOT_OUT_DIR/update_fallback.txt)"
-    run_agentroot_status_check "$AGENTROOT_OUT_DIR/status.json" || \
+    run_agentroot_check status "$AGENTROOT_OUT_DIR/status.json" || \
       die "agentroot status failed after fallback (see $AGENTROOT_OUT_DIR/status.json)"
     AGENTROOT_DOC_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "document_count")"
     AGENTROOT_EMBEDDED_COUNT="$(json_int_from_file "$AGENTROOT_OUT_DIR/status.json" "embedded_count")"
@@ -543,19 +484,7 @@ if [ "$AGENTROOT_MODE" = "collection-update" ]; then
 
   [ "$AGENTROOT_DOC_COUNT" -gt 0 ] || die "agentroot indexed zero documents after fallback"
 
-  attempt_agentroot_embed
-
-  log "Running retrieval validation"
-  if run_agentroot_query_check "retry backoff" "$AGENTROOT_OUT_DIR/query_check.txt"; then
-    QUERY_OK=1
-  else
-    warn "agentroot query check failed (see $AGENTROOT_OUT_DIR/query_check.txt)"
-  fi
-  if run_agentroot_vsearch_check "permission check" "$AGENTROOT_OUT_DIR/vsearch_check.txt"; then
-    VSEARCH_OK=1
-  else
-    warn "agentroot vsearch check failed (see $AGENTROOT_OUT_DIR/vsearch_check.txt)"
-  fi
+  run_embed_and_validate
 fi
 
 test -s "$AGENTROOT_OUT_DIR/query_check.txt" || die "query_check.txt was not written"
@@ -645,7 +574,7 @@ cat > "$MANIFEST_PATH" <<MANIFEST
   "retrieval_mode": "$(json_escape "$RETRIEVAL_MODE")",
   "retrieval_query_ok": $QUERY_OK,
   "retrieval_vsearch_ok": $VSEARCH_OK,
-  "exclude_patterns": [".git", "node_modules", "target", "dist", "build", ".next", "coverage"],
+  "exclude_patterns": $(exclude_dirs_json_array),
   "modes_enabled": $MODES_ENABLED,
   "pagerank_top_k": $TOP_K,
   "budget_mode": "$(json_escape "$MODE")",
@@ -658,7 +587,8 @@ log "Wrote $MANIFEST_PATH"
 DERIVED_SCRIPT="$SCRIPT_DIR/build_derived_artifacts.sh"
 if [ -x "$DERIVED_SCRIPT" ]; then
   log "Building derived artifacts"
-  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE" --top-k "$TOP_K"
+  bash "$DERIVED_SCRIPT" --repo "$REPO_PATH_ABS" --output "$AUDIT_INDEX_DIR" --mode "$MODE" --top-k "$TOP_K" \
+    --has-rust "$HAS_RUST" --has-ts "$HAS_TS" --has-js "$HAS_JS"
   test -s "$DERIVED_OUT_DIR/catalog.json" || die "catalog.json was not generated"
   test -s "$DERIVED_OUT_DIR/hotspots.json" || die "hotspots.json was not generated"
   test -s "$DERIVED_OUT_DIR/dup_clusters.md" || die "dup_clusters.md was not generated"
@@ -670,7 +600,7 @@ if [ "$SKIP_READ_PLAN" -eq 0 ]; then
   READ_PLAN_SCRIPT="$SCRIPT_DIR/build_read_plan.sh"
   if [ -x "$READ_PLAN_SCRIPT" ]; then
     log "Running read plan builder"
-    bash "$READ_PLAN_SCRIPT" --repo "$REPO_PATH_ABS" --output "$OUTPUT_DIR_ABS" --mode "$MODE"
+    bash "$READ_PLAN_SCRIPT" --repo "$REPO_PATH_ABS" --output "$AUDIT_INDEX_DIR" --mode "$MODE"
     test -e "$DERIVED_OUT_DIR/read_plan.tsv" || die "read_plan.tsv was not generated"
     test -s "$DERIVED_OUT_DIR/read_plan.md" || die "read_plan.md was not generated"
   else
@@ -678,5 +608,8 @@ if [ "$SKIP_READ_PLAN" -eq 0 ]; then
   fi
 fi
 
-log "Indexing complete"
+log "Indexing complete — finalizing output"
+rm -rf "$OUTPUT_DIR_ABS/audit_index"
+mv "$AUDIT_INDEX_DIR" "$OUTPUT_DIR_ABS/audit_index"
+log "Renamed audit_index.tmp/ → audit_index/"
 printf 'OUTPUT_DIR=%s\n' "$OUTPUT_DIR_ABS"

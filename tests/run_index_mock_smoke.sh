@@ -26,6 +26,17 @@ json_int() {
   fi
 }
 
+json_bool() {
+  file="$1"
+  key="$2"
+  value="$(sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\(true\\).*/\\1/p" "$file" | head -n1)"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value"
+    return
+  fi
+  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\\(false\\).*/\\1/p" "$file" | head -n1
+}
+
 assert_nonempty_file() {
   path="$1"
   [ -s "$path" ] || fail "expected non-empty file: $path"
@@ -310,6 +321,14 @@ run_case() {
   mock_vsearch_fail="${18:-0}"
   expected_retrieval_mode="${19:-}"
   expected_embed_utf8_panic="${20:-0}"
+  case_mode="${21:-standard}"
+  expected_top_k="${22:-}"
+  skip_read_plan="${23:-0}"
+
+  case "$skip_read_plan" in
+    0|1) ;;
+    *) fail "case $case_name: skip_read_plan must be 0|1, got '$skip_read_plan'" ;;
+  esac
 
   (
     set -euo pipefail
@@ -319,7 +338,7 @@ run_case() {
     output_dir="$work_dir/output"
     bin_dir="$work_dir/bin"
 
-    if [ "$repo_layout" = "nested-rust" ]; then
+    if [ "$repo_layout" = "nested-rust" ] || [ "$repo_layout" = "nested-rust-mixed" ]; then
       mkdir -p "$repo_dir/backend/src"
       cat > "$repo_dir/backend/Cargo.toml" <<'EOF_CARGO'
 [package]
@@ -332,6 +351,31 @@ fn main() {
     println!("nested");
 }
 EOF_RS
+      if [ "$repo_layout" = "nested-rust-mixed" ]; then
+        cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-mixed-repo", "version": "1.0.0"}
+EOF_PKG
+      fi
+    elif [ "$repo_layout" = "ts-node" ]; then
+      mkdir -p "$repo_dir/src"
+      cat > "$repo_dir/tsconfig.json" <<'EOF_TS'
+{"compilerOptions": {"target": "es2020", "module": "commonjs"}}
+EOF_TS
+      cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-ts-repo", "version": "1.0.0"}
+EOF_PKG
+      cat > "$repo_dir/src/app.ts" <<'EOF_TSRC'
+const greeting: string = "hello";
+console.log(greeting);
+EOF_TSRC
+    elif [ "$repo_layout" = "js-only" ]; then
+      mkdir -p "$repo_dir/src"
+      cat > "$repo_dir/package.json" <<'EOF_PKG'
+{"name": "mock-js-repo", "version": "1.0.0"}
+EOF_PKG
+      cat > "$repo_dir/src/index.js" <<'EOF_JS'
+console.log("hello");
+EOF_JS
     else
       mkdir -p "$repo_dir/src"
       cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
@@ -374,11 +418,21 @@ EOF_RS
         ;;
     esac
 
+    # [R-006] Pre-create audit_index/ with sentinel to verify it survives the run
+    mkdir -p "$output_dir/audit_index"
+    printf 'sentinel\n' > "$output_dir/audit_index/.pre_existing_marker"
+
+    skip_flags=""
+    if [ "$skip_read_plan" -eq 1 ]; then
+      skip_flags="--skip-read-plan"
+    fi
+
     run_output="$(
       bash "$RUN_INDEX_SCRIPT" \
         --repo "$repo_dir" \
         --output "$output_dir" \
-        --mode standard
+        --mode "$case_mode" \
+        $skip_flags
     )"
 
     resolved_output="$(printf '%s\n' "$run_output" | sed -n 's/^OUTPUT_DIR=//p' | tail -n1)"
@@ -389,9 +443,33 @@ EOF_RS
     assert_nonempty_file "$resolved_output/audit_index/derived/catalog.json"
     assert_nonempty_file "$resolved_output/audit_index/derived/hotspots.json"
     assert_nonempty_file "$resolved_output/audit_index/derived/dup_clusters.md"
-    [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
-      fail "case $case_name: expected read_plan.tsv to exist"
-    assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
+    if [ "$skip_read_plan" -eq 1 ]; then
+      if [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ]; then
+        fail "case $case_name: read_plan.tsv should NOT exist when --skip-read-plan is set"
+      fi
+      if [ -e "$resolved_output/audit_index/derived/read_plan.md" ]; then
+        fail "case $case_name: read_plan.md should NOT exist when --skip-read-plan is set"
+      fi
+    else
+      [ -e "$resolved_output/audit_index/derived/read_plan.tsv" ] || \
+        fail "case $case_name: expected read_plan.tsv to exist"
+      assert_nonempty_file "$resolved_output/audit_index/derived/read_plan.md"
+    fi
+
+    # Guard: no nested audit_index/audit_index.tmp path produced
+    if [ -d "$resolved_output/audit_index/audit_index.tmp" ]; then
+      fail "case $case_name: nested audit_index/audit_index.tmp directory detected — contract mismatch"
+    fi
+
+    # Assert no stale audit_index.tmp/ remains after successful run
+    if [ -d "$resolved_output/audit_index.tmp" ]; then
+      fail "case $case_name: audit_index.tmp/ still exists after successful run — atomic rename failed"
+    fi
+
+    # Pre-existing audit_index/ should be replaced (not preserved) on success
+    if [ -f "$resolved_output/audit_index/.pre_existing_marker" ]; then
+      fail "case $case_name: pre-existing sentinel still present — old audit_index/ was not replaced"
+    fi
 
     llmcc_mode_actual="$(json_string "$manifest" "llmcc_mode")"
     [ "$llmcc_mode_actual" = "$expected_llmcc_mode" ] || \
@@ -431,6 +509,58 @@ EOF_RS
         fail "case $case_name: expected retrieval_mode=$expected_retrieval_mode, got $retrieval_mode"
     fi
 
+    if [ -n "$expected_top_k" ]; then
+      actual_top_k="$(json_int "$manifest" "pagerank_top_k")"
+      [ "$actual_top_k" -eq "$expected_top_k" ] || \
+        fail "case $case_name: expected pagerank_top_k=$expected_top_k, got $actual_top_k"
+    fi
+
+    catalog="$resolved_output/audit_index/derived/catalog.json"
+    assert_nonempty_file "$catalog"
+
+    catalog_rust="$(json_bool "$catalog" "rust")"
+    catalog_ts="$(json_bool "$catalog" "typescript")"
+    catalog_js="$(json_bool "$catalog" "javascript")"
+
+    if [ "$repo_layout" = "nested-rust" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for nested-rust layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for nested-rust layout, got $catalog_ts"
+      [ "$catalog_js" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=false for nested-rust layout, got $catalog_js"
+    elif [ "$repo_layout" = "nested-rust-mixed" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for nested-rust-mixed layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for nested-rust-mixed layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for nested-rust-mixed layout, got $catalog_js"
+    elif [ "$repo_layout" = "ts-node" ]; then
+      [ "$catalog_rust" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.rust=false for ts-node layout, got $catalog_rust"
+      [ "$catalog_ts" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=true for ts-node layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for ts-node layout, got $catalog_js"
+
+      # TS graph artifacts must exist and be non-empty
+      ts_graph_dir="$resolved_output/audit_index/llmcc/ts"
+      assert_nonempty_file "$ts_graph_dir/depth2.dot"
+      assert_nonempty_file "$ts_graph_dir/depth3.dot"
+      assert_nonempty_file "$ts_graph_dir/depth3_topk.dot"
+    elif [ "$repo_layout" = "js-only" ]; then
+      [ "$catalog_rust" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.rust=false for js-only layout, got $catalog_rust"
+      [ "$catalog_ts" = "false" ] || \
+        fail "case $case_name: expected catalog stacks.typescript=false for js-only layout, got $catalog_ts"
+      [ "$catalog_js" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.javascript=true for js-only layout, got $catalog_js"
+    elif [ "$repo_layout" = "root-rust" ]; then
+      [ "$catalog_rust" = "true" ] || \
+        fail "case $case_name: expected catalog stacks.rust=true for root-rust layout, got $catalog_rust"
+    fi
+
     printf '[run_index_mock_smoke] PASS: %s\n' "$case_name"
     rm -rf "$work_dir"
   )
@@ -453,6 +583,11 @@ run_case "nested-rust-workspace-marker" \
   "flag-depth" "collection-update" \
   "nested-rust"
 
+run_case "nested-rust-mixed-with-js" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "nested-rust-mixed"
+
 run_case "auto-embed-default-on-when-vectors-missing" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
@@ -463,10 +598,106 @@ run_case "auto-embed-opt-out-when-vectors-missing" \
   "flag-depth" "collection-update" \
   "root-rust" "0" "0" "0" "0" "none"
 
+run_case "js-only-repo-stack-flags" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "js-only"
+
+run_case "ts-node-repo-stack-flags" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "ts-node"
+
+run_case "mode-fast-top-k-80" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "fast" "80"
+
+run_case "mode-deep-top-k-350" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "deep" "350"
+
+run_case "skip-read-plan-no-artifacts" \
+  "flag" "flag" "collection" "1" "0" \
+  "flag-depth" "collection-update" \
+  "root-rust" "23" "unset" "0" "0" "none" \
+  "0" "0" "0" "0" "" "0" \
+  "standard" "" "1"
+
 run_case "embed-utf8-panic-falls-back-to-bm25" \
   "flag" "flag" "collection" "1" "0" \
   "flag-depth" "collection-update" \
   "root-rust" "0" "unset" "1" "0" "direct" \
   "1" "1" "1" "1" "bm25-only" "1"
+
+# --- Failure-path test: pre-existing audit_index/ preserved, audit_index.tmp/ cleaned up ---
+(
+  set -euo pipefail
+
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/vca-smoke.failure-cleanup.XXXXXX")"
+  repo_dir="$work_dir/repo"
+  output_dir="$work_dir/output"
+
+  # Create a minimal repo (no mock bins → llmcc not found → die)
+  mkdir -p "$repo_dir/src"
+  cat > "$repo_dir/Cargo.toml" <<'EOF_CARGO'
+[package]
+name = "mock-fail"
+version = "0.1.0"
+edition = "2021"
+EOF_CARGO
+
+  # Pre-create audit_index/ with sentinel
+  mkdir -p "$output_dir/audit_index"
+  printf 'survivor\n' > "$output_dir/audit_index/.pre_existing_marker"
+
+  # Run without mock bins on PATH — llmcc check will die
+  # Use a clean PATH without mock bins
+  if PATH="/usr/bin:/bin" bash "$RUN_INDEX_SCRIPT" \
+    --repo "$repo_dir" \
+    --output "$output_dir" \
+    --mode standard >/dev/null 2>&1; then
+    fail "failure-cleanup: expected run_index.sh to fail when llmcc is missing"
+  fi
+
+  # Assert: pre-existing audit_index/ is preserved
+  if [ ! -f "$output_dir/audit_index/.pre_existing_marker" ]; then
+    fail "failure-cleanup: pre-existing audit_index/ was destroyed on failure"
+  fi
+
+  # Assert: audit_index.tmp/ is cleaned up
+  if [ -d "$output_dir/audit_index.tmp" ]; then
+    fail "failure-cleanup: audit_index.tmp/ still exists after failure — cleanup trap did not run"
+  fi
+
+  printf '[run_index_mock_smoke] PASS: failure-cleanup (pre-existing index preserved, tmp cleaned)\n'
+  rm -rf "$work_dir"
+)
+
+# Shellcheck gate for modified pipeline scripts
+PIPELINE_SCRIPTS=(
+  "$ROOT_DIR/vibe-code-audit/scripts/run_index.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/build_derived_artifacts.sh"
+  "$ROOT_DIR/vibe-code-audit/scripts/build_read_plan.sh"
+)
+if command -v shellcheck >/dev/null 2>&1; then
+  sc_fail=0
+  for script in "${PIPELINE_SCRIPTS[@]}"; do
+    if ! shellcheck -x -S warning "$script" >/dev/null 2>&1; then
+      printf '[run_index_mock_smoke] WARN: shellcheck found warnings in %s\n' "$(basename "$script")" >&2
+      sc_fail=1
+    fi
+  done
+  if [ "$sc_fail" -eq 0 ]; then
+    printf '[run_index_mock_smoke] PASS: shellcheck (no new warnings)\n'
+  fi
+else
+  printf '[run_index_mock_smoke] SKIP: shellcheck not installed — install via "brew install shellcheck"\n' >&2
+fi
 
 printf '[run_index_mock_smoke] All smoke cases passed.\n'

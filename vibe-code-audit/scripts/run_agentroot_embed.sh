@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="run_agentroot_embed.sh"
+SCRIPT_NAME="run_agentroot_embed"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -36,31 +38,6 @@ Environment overrides:
   VIBE_CODE_AUDIT_EMBED_BATCH_SIZE
   VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-has_pattern_in_files() {
-  pattern="$1"
-  shift
-  for file in "$@"; do
-    [ -f "$file" ] || continue
-    if grep -Eqi "$pattern" "$file"; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 health_url() {
@@ -158,14 +135,63 @@ emit_result() {
 cleanup() {
   if [ "$SERVER_STARTED" -eq 1 ] && [ -n "${LLAMA_PID:-}" ] && [ "$KEEP_SERVER" -ne 1 ]; then
     kill "$LLAMA_PID" >/dev/null 2>&1 || true
+    LLAMA_PID=""
+    SERVER_STARTED=0
   fi
 }
 
-# Source persistent embed config from installer if present
+# Parse persistent embed config from installer if present (safe line-by-line,
+# never sourced as shell code to prevent command injection).
 EMBED_ENV_FILE="$HOME/.config/vibe-code-audit/embed.env"
 if [ -f "$EMBED_ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$EMBED_ENV_FILE"
+  # Snapshot which keys are already set in the environment before parsing,
+  # so pre-existing env vars take precedence but later lines in the file
+  # can still override earlier ones (last-occurrence-wins within the file).
+  _env_preset=""
+  for _env_k in VIBE_CODE_AUDIT_EMBED_MODEL_PATH VIBE_CODE_AUDIT_EMBED_MODEL_URL \
+    VIBE_CODE_AUDIT_EMBED_HOST VIBE_CODE_AUDIT_EMBED_PORT \
+    VIBE_CODE_AUDIT_EMBED_START_LOCAL VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL \
+    VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS VIBE_CODE_AUDIT_EMBED_KEEP_SERVER \
+    VIBE_CODE_AUDIT_EMBED_CTX_SIZE VIBE_CODE_AUDIT_EMBED_BATCH_SIZE \
+    VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE; do
+    if [ -n "${!_env_k+x}" ]; then
+      _env_preset="${_env_preset}${_env_k} "
+    fi
+  done
+  while IFS='=' read -r _env_key _env_value || [ -n "$_env_key" ]; do
+    # Skip blank lines and comments
+    case "$_env_key" in
+      ''|\#*) continue ;;
+    esac
+    # Strip trailing carriage return from value (CRLF files)
+    _env_value="${_env_value%$'\r'}"
+    # Strip one layer of matching surrounding quotes
+    case "$_env_value" in
+      \"*\") _env_value="${_env_value#\"}"; _env_value="${_env_value%\"}" ;;
+      \'*\') _env_value="${_env_value#\'}"; _env_value="${_env_value%\'}" ;;
+    esac
+    # Only accept whitelisted keys; defer to pre-existing env vars
+    case "$_env_key" in
+      VIBE_CODE_AUDIT_EMBED_MODEL_PATH|\
+      VIBE_CODE_AUDIT_EMBED_MODEL_URL|\
+      VIBE_CODE_AUDIT_EMBED_HOST|\
+      VIBE_CODE_AUDIT_EMBED_PORT|\
+      VIBE_CODE_AUDIT_EMBED_START_LOCAL|\
+      VIBE_CODE_AUDIT_EMBED_DOWNLOAD_MODEL|\
+      VIBE_CODE_AUDIT_EMBED_WAIT_SECONDS|\
+      VIBE_CODE_AUDIT_EMBED_KEEP_SERVER|\
+      VIBE_CODE_AUDIT_EMBED_CTX_SIZE|\
+      VIBE_CODE_AUDIT_EMBED_BATCH_SIZE|\
+      VIBE_CODE_AUDIT_EMBED_UBATCH_SIZE)
+        # Skip if this key was already set before file parsing began
+        case "$_env_preset" in
+          *"$_env_key "*) ;;
+          *) export "$_env_key=$_env_value" ;;
+        esac
+        ;;
+    esac
+  done < "$EMBED_ENV_FILE"
+  unset _env_key _env_value _env_k _env_preset
 fi
 
 DB_PATH=""
@@ -268,7 +294,7 @@ EMBED_LOG="$OUTPUT_DIR/embed.log"
 EMBED_RETRY_LOG="$OUTPUT_DIR/embed_retry.log"
 LLAMA_SERVER_LOG="$OUTPUT_DIR/llama_server.log"
 
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 BACKEND="direct"
 if run_embed "$EMBED_LOG"; then

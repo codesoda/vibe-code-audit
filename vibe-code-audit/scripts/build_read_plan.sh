@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="build_read_plan.sh"
+SCRIPT_NAME="build_read_plan"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -11,21 +13,12 @@ Usage:
   build_read_plan.sh --repo <repo_path> --output <output_dir> [--mode fast|standard|deep]
 
 Writes:
-  <output_dir>/audit_index/derived/read_plan.tsv
-  <output_dir>/audit_index/derived/read_plan.md
+  <output_dir>/derived/read_plan.tsv
+  <output_dir>/derived/read_plan.md
 
 TSV columns:
   file_path<TAB>match_line<TAB>start_line<TAB>end_line<TAB>signal
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
 }
 
 REPO_PATH=""
@@ -85,13 +78,9 @@ case "$MODE" in
 esac
 
 REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
-OUTPUT_DIR_ABS="$OUTPUT_DIR"
-case "$OUTPUT_DIR_ABS" in
-  /*) ;;
-  *) OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)" ;;
-esac
+OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
 
-DERIVED_DIR="$OUTPUT_DIR_ABS/audit_index/derived"
+DERIVED_DIR="$OUTPUT_DIR_ABS/derived"
 mkdir -p "$DERIVED_DIR"
 
 RAW_MATCHES="$DERIVED_DIR/.read_plan_matches_raw.tsv"
@@ -108,15 +97,19 @@ log "limits: max_slices=$MAX_SLICES max_files=$MAX_FILES radius=$RADIUS"
 
 pushd "$REPO_PATH_ABS" >/dev/null
 
+rg_exclude_args=()
+for dir in $EXCLUDE_DIRS; do
+  rg_exclude_args+=(--glob "!${dir}/**")
+done
+
+grep_exclude_args=()
+for dir in $EXCLUDE_DIRS; do
+  grep_exclude_args+=(--exclude-dir "$dir")
+done
+
 if command -v rg >/dev/null 2>&1; then
   rg -n -S \
-    --glob '!.git/**' \
-    --glob '!node_modules/**' \
-    --glob '!target/**' \
-    --glob '!dist/**' \
-    --glob '!build/**' \
-    --glob '!.next/**' \
-    --glob '!coverage/**' \
+    "${rg_exclude_args[@]}" \
     --glob '!**/*.md' \
     --glob '!**/*.txt' \
     --glob '!**/*.lock' \
@@ -126,7 +119,7 @@ if command -v rg >/dev/null 2>&1; then
     --glob '!**/*.jpeg' \
     "$PATTERN" . > "$RAW_MATCHES" || true
 else
-  grep -R -n -E "$PATTERN" . > "$RAW_MATCHES" || true
+  grep -R -n -E "${grep_exclude_args[@]}" "$PATTERN" . > "$RAW_MATCHES" || true
 fi
 
 popd >/dev/null

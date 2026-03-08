@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="render_report_pdf.sh"
+SCRIPT_NAME="render_report_pdf"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -17,14 +19,6 @@ Behavior:
   - If rendering succeeds, this script exits 0 and prints:
       PDF_PATH=<absolute path to generated PDF>
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-warn() {
-  printf '[%s] WARNING: %s\n' "$SCRIPT_NAME" "$*" >&2
 }
 
 REPORT_PATH=""
@@ -234,6 +228,15 @@ make_report_without_system_map() {
   }
   ' "$in_report" > "$out_report"
 }
+
+PANDOC_LOG_MAIN=""
+PANDOC_LOG_RETRY=""
+TMP_REPORT_NO_MAP=""
+
+cleanup() {
+  rm -f "$PANDOC_LOG_MAIN" "$PANDOC_LOG_RETRY" "$TMP_REPORT_NO_MAP"
+}
+trap cleanup EXIT INT TERM
 
 log "Rendering PDF with pandoc engine: $PDF_ENGINE"
 PANDOC_LOG_MAIN="$(mktemp "${TMPDIR:-/tmp}/vca-pandoc-main.XXXXXX.log")"

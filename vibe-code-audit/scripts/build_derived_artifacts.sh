@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_NAME="build_derived_artifacts.sh"
+SCRIPT_NAME="build_derived_artifacts"
+# shellcheck source=_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -11,29 +13,19 @@ Usage:
   build_derived_artifacts.sh --repo <repo_path> --output <output_dir> [--mode <fast|standard|deep>] [--top-k <n>]
 
 Writes:
-  <output_dir>/audit_index/derived/catalog.json
-  <output_dir>/audit_index/derived/hotspots.json
-  <output_dir>/audit_index/derived/dup_clusters.md
+  <output_dir>/derived/catalog.json
+  <output_dir>/derived/hotspots.json
+  <output_dir>/derived/dup_clusters.md
 USAGE
-}
-
-log() {
-  printf '[%s] %s\n' "$SCRIPT_NAME" "$*" >&2
-}
-
-die() {
-  printf '[%s] ERROR: %s\n' "$SCRIPT_NAME" "$*" >&2
-  exit 1
-}
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 REPO_PATH=""
 OUTPUT_DIR=""
 MODE="standard"
 TOP_K="0"
+FLAG_HAS_RUST=""
+FLAG_HAS_TS=""
+FLAG_HAS_JS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -57,6 +49,21 @@ while [ $# -gt 0 ]; do
       TOP_K="$2"
       shift 2
       ;;
+    --has-rust)
+      [ $# -ge 2 ] || die "--has-rust requires a value"
+      FLAG_HAS_RUST="$2"
+      shift 2
+      ;;
+    --has-ts)
+      [ $# -ge 2 ] || die "--has-ts requires a value"
+      FLAG_HAS_TS="$2"
+      shift 2
+      ;;
+    --has-js)
+      [ $# -ge 2 ] || die "--has-js requires a value"
+      FLAG_HAS_JS="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -71,14 +78,21 @@ done
 [ -n "$OUTPUT_DIR" ] || die "--output is required"
 [ -d "$REPO_PATH" ] || die "repo path not found: $REPO_PATH"
 
-REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
-OUTPUT_DIR_ABS="$OUTPUT_DIR"
-case "$OUTPUT_DIR_ABS" in
-  /*) ;;
-  *) OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)" ;;
-esac
+# Validate --has-* flags: must be 0 or 1 if provided
+if [ -n "$FLAG_HAS_RUST" ]; then
+  case "$FLAG_HAS_RUST" in 0|1) ;; *) die "--has-rust: invalid value '$FLAG_HAS_RUST' (expected 0 or 1)" ;; esac
+fi
+if [ -n "$FLAG_HAS_TS" ]; then
+  case "$FLAG_HAS_TS" in 0|1) ;; *) die "--has-ts: invalid value '$FLAG_HAS_TS' (expected 0 or 1)" ;; esac
+fi
+if [ -n "$FLAG_HAS_JS" ]; then
+  case "$FLAG_HAS_JS" in 0|1) ;; *) die "--has-js: invalid value '$FLAG_HAS_JS' (expected 0 or 1)" ;; esac
+fi
 
-AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS/audit_index"
+REPO_PATH_ABS="$(cd "$REPO_PATH" && pwd)"
+OUTPUT_DIR_ABS="$(cd "$REPO_PATH_ABS" && resolve_output_dir "$OUTPUT_DIR")"
+
+AUDIT_INDEX_DIR="$OUTPUT_DIR_ABS"
 DERIVED_DIR="$AUDIT_INDEX_DIR/derived"
 mkdir -p "$DERIVED_DIR"
 
@@ -189,9 +203,21 @@ HAS_JS="false"
 HAS_FRONTEND="false"
 WORKSPACE_DETECTED="false"
 
-[ -f "$REPO_PATH_ABS/Cargo.toml" ] && HAS_RUST="true"
-[ -f "$REPO_PATH_ABS/tsconfig.json" ] && HAS_TS="true"
-[ -f "$REPO_PATH_ABS/package.json" ] && HAS_JS="true"
+if [ -n "$FLAG_HAS_RUST" ]; then
+  [ "$FLAG_HAS_RUST" = "1" ] && HAS_RUST="true"
+else
+  [ -f "$REPO_PATH_ABS/Cargo.toml" ] && HAS_RUST="true"
+fi
+if [ -n "$FLAG_HAS_TS" ]; then
+  [ "$FLAG_HAS_TS" = "1" ] && HAS_TS="true"
+else
+  [ -f "$REPO_PATH_ABS/tsconfig.json" ] && HAS_TS="true"
+fi
+if [ -n "$FLAG_HAS_JS" ]; then
+  [ "$FLAG_HAS_JS" = "1" ] && HAS_JS="true"
+else
+  [ -f "$REPO_PATH_ABS/package.json" ] && HAS_JS="true"
+fi
 [ -d "$REPO_PATH_ABS/web/src" ] && HAS_FRONTEND="true"
 
 if [ -f "$REPO_PATH_ABS/Cargo.toml" ] && grep -Eq '^\[workspace\]' "$REPO_PATH_ABS/Cargo.toml"; then
