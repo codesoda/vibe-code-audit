@@ -1,0 +1,44 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run lib unit tests
+        run: bash tests/lib_unit_test.sh
+
+      - name: Run mocked run_index smoke tests
+        run: bash tests/run_index_mock_smoke.sh
+
+      - name: Run atomic index mid-run failure tests
+        run: bash tests/atomic_index_midrun_failure_test.sh
+
+      - name: Run embed env hardening tests
+        run: bash tests/embed_env_hardening_test.sh
+
+      - name: Run empty repo tests
+        run: bash tests/empty_repo_test.sh
+
+      - name: Run grep fallback tests
+        run: bash tests/grep_fallback_test.sh
+
+      - name: Run trap cleanup tests
+        run: bash tests/trap_cleanup_test.sh
+
+      - name: Run render PDF smoke tests
+        run: bash tests/render_pdf_smoke_test.sh
+
+      - name: Run render system map smoke tests
+        run: bash tests/render_system_map_smoke_test.sh
+
+      - name: Run manifest integrity tests
+        run: bash tests/manifest_integrity_test.sh
