@@ -8,36 +8,17 @@ set -euo pipefail
 #   3. Valid hotspots.json with empty files_by_symbol_count
 #   4. Non-empty dup_clusters.md bootstrap scaffold
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_NAME="empty_repo"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 SCRIPT="$ROOT_DIR/vibe-code-audit/scripts/build_derived_artifacts.sh"
-
-PASS=0
-FAIL=0
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  printf 'PASS: %s\n' "$*"
-  PASS=$((PASS + 1))
-}
 
 # ---------------------------------------------------------------------------
 # Setup: temp fixture with empty repo, cleanup trap
 # ---------------------------------------------------------------------------
 
-TMPROOT=""
-
-cleanup() {
-  if [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ]; then
-    rm -rf "$TMPROOT"
-  fi
-}
-trap cleanup EXIT INT TERM
-
-TMPROOT="$(mktemp -d)"
+setup_tmproot
 MOCK_REPO="$TMPROOT/repo"
 OUTPUT_DIR="$TMPROOT/output"
 mkdir -p "$MOCK_REPO/.git" "$OUTPUT_DIR"
@@ -241,5 +222,4 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+print_results

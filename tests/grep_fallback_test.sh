@@ -7,38 +7,18 @@ set -euo pipefail
 #   2. Produces correct read_plan.tsv / read_plan.md artifacts
 #   3. Excludes files from excluded directories and includes files from valid paths
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_NAME="grep_fallback"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 SCRIPT="$ROOT_DIR/vibe-code-audit/scripts/build_read_plan.sh"
-
-PASS=0
-FAIL=0
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  printf 'PASS: %s\n' "$*"
-  PASS=$((PASS + 1))
-}
 
 # ---------------------------------------------------------------------------
 # Setup: temp dirs, PATH hiding, cleanup trap
 # ---------------------------------------------------------------------------
 
 ORIG_PATH="$PATH"
-TMPROOT=""
-
-cleanup() {
-  PATH="$ORIG_PATH"
-  if [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ]; then
-    rm -rf "$TMPROOT"
-  fi
-}
-trap cleanup EXIT INT TERM
-
-TMPROOT="$(mktemp -d)"
+setup_tmproot
 MOCK_REPO="$TMPROOT/repo"
 OUTPUT_DIR="$TMPROOT/output"
 mkdir -p "$MOCK_REPO" "$OUTPUT_DIR"
@@ -100,21 +80,7 @@ printf 'const timeout = config.retryBackoff || 3000;\n' > "$MOCK_REPO/lib/retry.
 # PATH manipulation: hide rg
 # ---------------------------------------------------------------------------
 
-# Build a filtered PATH that excludes any directory containing rg
-FILTERED_PATH=""
-IFS=':'
-for segment in $ORIG_PATH; do
-  if [ -x "$segment/rg" ]; then
-    continue
-  fi
-  if [ -n "$FILTERED_PATH" ]; then
-    FILTERED_PATH="$FILTERED_PATH:$segment"
-  else
-    FILTERED_PATH="$segment"
-  fi
-done
-unset IFS
-
+build_filtered_path "rg"
 export PATH="$FILTERED_PATH"
 
 # Verify rg is truly hidden
@@ -122,7 +88,7 @@ if command -v rg >/dev/null 2>&1; then
   fail "rg still visible in PATH after filtering — fallback test unreliable"
   # Restore and skip dynamic tests
   PATH="$ORIG_PATH"
-  printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
+  print_results
   exit "$FAIL"
 else
   pass "rg hidden from PATH — grep fallback will be exercised"
@@ -243,5 +209,4 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf '\n--- Results: %d passed, %d failed ---\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+print_results

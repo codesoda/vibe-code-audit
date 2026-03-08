@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PASS=0
-FAIL=0
-fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
-pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+TEST_NAME="embed_env_hardening"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
 
-SCRIPTS_DIR="$(cd "$(dirname "$0")/../vibe-code-audit/scripts" && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/vibe-code-audit/scripts"
 SCRIPT="$SCRIPTS_DIR/run_agentroot_embed.sh"
 
 echo "=== Embed Env Hardening Tests ==="
@@ -56,12 +55,10 @@ fi
 
 # --- Dynamic test infrastructure ---
 
-TMPDIR_ROOT="$(mktemp -d)"
-cleanup() { rm -rf "$TMPDIR_ROOT"; }
-trap cleanup EXIT INT TERM
+setup_tmproot
 
 # Create mock binaries
-MOCK_BIN="$TMPDIR_ROOT/bin"
+MOCK_BIN="$TMPROOT/bin"
 mkdir -p "$MOCK_BIN"
 
 # Mock agentroot: always fails embed (triggers connection-refused path)
@@ -93,7 +90,7 @@ run_with_env() {
   shift
   local tag="${1:-default}"
   shift || true
-  local test_home="$TMPDIR_ROOT/home_${tag}"
+  local test_home="$TMPROOT/home_${tag}"
   mkdir -p "$test_home/.config/vibe-code-audit"
   local test_db="$test_home/test.sqlite"
   touch "$test_db"
@@ -108,7 +105,7 @@ run_with_env() {
 # Helper: get the health URL the script tried (via mock curl log)
 get_health_url() {
   local tag="$1"
-  local curl_log="$TMPDIR_ROOT/home_${tag}/curl_urls.log"
+  local curl_log="$TMPROOT/home_${tag}/curl_urls.log"
   if [ -f "$curl_log" ]; then
     head -1 "$curl_log"
   else
@@ -143,7 +140,7 @@ fi
 # --- 7. Command injection via semicolon is NOT executed ---
 echo ""
 echo "--- Dynamic: command injection prevention ---"
-PWNED="$TMPDIR_ROOT/pwned_semicolon"
+PWNED="$TMPROOT/pwned_semicolon"
 run_with_env "VIBE_CODE_AUDIT_EMBED_HOST=localhost; touch $PWNED" "inject_semi" >/dev/null
 if [ -f "$PWNED" ]; then
   fail "Command injection via semicolon was executed"
@@ -152,7 +149,7 @@ else
 fi
 
 # --- 8. Command substitution is NOT executed ---
-PWNED2="$TMPDIR_ROOT/pwned_subst"
+PWNED2="$TMPROOT/pwned_subst"
 run_with_env "VIBE_CODE_AUDIT_EMBED_HOST=\$(touch $PWNED2)" "inject_subst" >/dev/null
 if [ -f "$PWNED2" ]; then
   fail "Command substitution injection was executed"
@@ -161,7 +158,7 @@ else
 fi
 
 # --- 9. Backtick injection is NOT executed ---
-PWNED3="$TMPDIR_ROOT/pwned_backtick"
+PWNED3="$TMPROOT/pwned_backtick"
 run_with_env "VIBE_CODE_AUDIT_EMBED_HOST=\`touch $PWNED3\`" "inject_backtick" >/dev/null
 if [ -f "$PWNED3" ]; then
   fail "Backtick injection was executed"
@@ -174,7 +171,7 @@ echo ""
 echo "--- Dynamic: non-whitelisted keys ---"
 # If non-whitelisted keys leaked, PATH would be overwritten and agentroot wouldn't be found
 # The script would die with "agentroot is not installed" instead of producing EMBED_OK output
-test_home_nwl="$TMPDIR_ROOT/home_nwl"
+test_home_nwl="$TMPROOT/home_nwl"
 mkdir -p "$test_home_nwl/.config/vibe-code-audit"
 touch "$test_home_nwl/test.sqlite"
 printf 'EVIL_KEY=drop_tables\nLD_PRELOAD=/evil.so\nVIBE_CODE_AUDIT_EMBED_HOST=5.5.5.5\n' \
@@ -213,7 +210,7 @@ fi
 # --- 12. Missing embed.env does not crash ---
 echo ""
 echo "--- Dynamic: missing embed.env ---"
-test_home_miss="$TMPDIR_ROOT/home_miss"
+test_home_miss="$TMPROOT/home_miss"
 mkdir -p "$test_home_miss"
 touch "$test_home_miss/test.sqlite"
 miss_output="$(HOME="$test_home_miss" PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -239,7 +236,7 @@ fi
 # --- 14. CLI flags override embed.env values ---
 echo ""
 echo "--- Dynamic: CLI override precedence ---"
-test_home_cli="$TMPDIR_ROOT/home_cli"
+test_home_cli="$TMPROOT/home_cli"
 mkdir -p "$test_home_cli/.config/vibe-code-audit"
 touch "$test_home_cli/test.sqlite"
 printf 'VIBE_CODE_AUDIT_EMBED_HOST=from-file\nVIBE_CODE_AUDIT_EMBED_PORT=1111\n' \
@@ -258,7 +255,7 @@ fi
 # --- 14b. Pre-existing env var takes precedence over embed.env ---
 echo ""
 echo "--- Dynamic: environment variable precedence over embed.env ---"
-test_home_prec="$TMPDIR_ROOT/home_prec"
+test_home_prec="$TMPROOT/home_prec"
 mkdir -p "$test_home_prec/.config/vibe-code-audit"
 touch "$test_home_prec/test.sqlite"
 printf 'VIBE_CODE_AUDIT_EMBED_HOST=from-file\nVIBE_CODE_AUDIT_EMBED_PORT=1111\n' \
@@ -291,8 +288,8 @@ echo ""
 echo "--- Dynamic: end-to-end output structure ---"
 run_with_env 'VIBE_CODE_AUDIT_EMBED_HOST=127.0.0.1
 VIBE_CODE_AUDIT_EMBED_PORT=8000' "e2e" >/dev/null
-e2e_output="$(HOME="$TMPDIR_ROOT/home_e2e" PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
-  bash "$SCRIPT" --db "$TMPDIR_ROOT/home_e2e/test.sqlite" --no-start-local 2>/dev/null || true)"
+e2e_output="$(HOME="$TMPROOT/home_e2e" PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+  bash "$SCRIPT" --db "$TMPROOT/home_e2e/test.sqlite" --no-start-local 2>/dev/null || true)"
 if echo "$e2e_output" | grep -q 'EMBED_OK=' && \
    echo "$e2e_output" | grep -q 'EMBED_BACKEND='; then
   pass "End-to-end output contains EMBED_OK and EMBED_BACKEND"
@@ -304,7 +301,7 @@ fi
 echo ""
 echo "--- Dynamic: env snapshot proves forbidden keys excluded ---"
 # Create an env-snapshot mock agentroot that dumps its inherited environment
-SNAP_BIN="$TMPDIR_ROOT/snap_bin"
+SNAP_BIN="$TMPROOT/snap_bin"
 mkdir -p "$SNAP_BIN"
 cat > "$SNAP_BIN/agentroot" <<'SNAP_STUB'
 #!/usr/bin/env bash
@@ -319,7 +316,7 @@ chmod +x "$SNAP_BIN/agentroot"
 # Reuse the existing mock curl in snap_bin
 cp "$MOCK_BIN/curl" "$SNAP_BIN/curl"
 
-test_home_snap="$TMPDIR_ROOT/home_snap"
+test_home_snap="$TMPROOT/home_snap"
 mkdir -p "$test_home_snap/.config/vibe-code-audit"
 touch "$test_home_snap/test.sqlite"
 SNAP_LOG="$test_home_snap/agentroot_env.log"
@@ -353,7 +350,7 @@ fi
 # --- 18. Combined injection + forbidden key payload ---
 echo ""
 echo "--- Dynamic: combined injection and forbidden key payload ---"
-PWNED_COMBINED="$TMPDIR_ROOT/pwned_combined"
+PWNED_COMBINED="$TMPROOT/pwned_combined"
 SNAP_LOG2="$test_home_snap/agentroot_env2.log"
 printf 'VIBE_CODE_AUDIT_EMBED_HOST=safe-host\nEVIL_KEY=should_be_ignored\nVIBE_CODE_AUDIT_EMBED_HOST=localhost; touch %s\n$(touch %s)\n' \
   "$PWNED_COMBINED" "$PWNED_COMBINED" \
@@ -378,13 +375,11 @@ fi
 # --- 19. Temp file leak check ---
 echo ""
 echo "--- Cleanup: temp file leak check ---"
-leaked_files="$(find "$TMPDIR_ROOT" -name 'vca-*' -type f 2>/dev/null || true)"
+leaked_files="$(find "$TMPROOT" -name 'vca-*' -type f 2>/dev/null || true)"
 if [ -z "$leaked_files" ]; then
   pass "No vca-* temp file leaks under test root"
 else
   fail "Leaked temp files found: $leaked_files"
 fi
 
-echo ""
-echo "=== Results: $PASS passed, $FAIL failed ==="
-[ "$FAIL" -eq 0 ] || exit 1
+print_results

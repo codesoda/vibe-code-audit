@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PASS=0
-FAIL=0
-fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
-pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+TEST_NAME="trap_cleanup"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
 
-SCRIPTS_DIR="$(cd "$(dirname "$0")/../vibe-code-audit/scripts" && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/vibe-code-audit/scripts"
 
 echo "=== Trap & Cleanup Tests ==="
 
@@ -233,6 +232,4 @@ fi
 # The trap declaration covers INT identically to TERM.
 # We verify INT registration via the static grep checks above.
 
-echo ""
-echo "=== Results: $PASS passed, $FAIL failed ==="
-[ "$FAIL" -eq 0 ] || exit 1
+print_results

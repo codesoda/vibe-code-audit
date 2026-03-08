@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # _lib.sh — shared utility library for vibe-code-audit pipeline scripts
 #
 # Sourced by all pipeline scripts (run_index.sh, build_derived_artifacts.sh,
@@ -26,8 +27,42 @@ die() {
 }
 
 # ---------------------------------------------------------------------------
+# Config path constants
+# ---------------------------------------------------------------------------
+
+# Canonical path for persistent embed configuration written by install.sh.
+# Can be overridden via environment for testing.
+EMBED_ENV_FILE="${EMBED_ENV_FILE:-$HOME/.config/vibe-code-audit/embed.env}"
+
+# ---------------------------------------------------------------------------
 # File & pattern helpers
 # ---------------------------------------------------------------------------
+
+# kv_from_file FILE KEY
+#   Extracts the value of KEY from a simple KEY=VALUE file.
+#   Reads the last occurrence of the key (last-occurrence-wins).
+#   Returns the value on stdout; empty string if not found.
+kv_from_file() {
+  local file="${1-}"
+  local key="${2-}"
+  local value
+  value="$(sed -n "s/^${key}=//p" "$file" | tail -n1)"
+  printf '%s\n' "$value"
+}
+
+# repo_has_file_named NAME
+#   Returns 0 (true) if a file named NAME exists anywhere in the current
+#   directory tree (respecting EXCLUDE_DIRS). Must be called from within
+#   the repository root (e.g., after pushd "$REPO_PATH_ABS").
+repo_has_file_named() {
+  local name="${1-}"
+  # shellcheck disable=SC2046
+  if find . \( $(exclude_find_prune_args) \) -prune \
+    -o -type f -name "$name" -print -quit | grep -q .; then
+    return 0
+  fi
+  return 1
+}
 
 # json_int_from_file FILE KEY
 #   Extracts the first integer value for KEY from a JSON-like FILE.

@@ -4,21 +4,18 @@ set -euo pipefail
 # Manifest integrity test for INSTALL_MANIFEST.txt
 # Ensures _lib.sh is listed exactly once and no duplicate entries exist.
 
+TEST_NAME="manifest_integrity"
+# shellcheck source=_test_lib.sh
+. "$(dirname "$0")/_test_lib.sh"
+
 MANIFEST="vibe-code-audit/INSTALL_MANIFEST.txt"
-PASS=0
-FAIL=0
-
-pass() { PASS=$((PASS + 1)); printf "  PASS: %s\n" "$1"; }
-fail() { FAIL=$((FAIL + 1)); printf "  FAIL: %s\n" "$1"; }
-
-printf "=== Manifest Integrity Tests ===\n"
 
 # 1. Manifest file exists
 if [ -f "$MANIFEST" ]; then
   pass "manifest file exists"
 else
   fail "manifest file not found at $MANIFEST"
-  printf "\nResults: %d passed, %d failed\n" "$PASS" "$FAIL"
+  print_results
   exit 1
 fi
 
@@ -60,5 +57,4 @@ else
   fail "entry format mismatch: got '$LIB_LINE'"
 fi
 
-printf "\n=== Results: %d passed, %d failed ===\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+print_results
