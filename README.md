@@ -1,5 +1,7 @@
 # vibe-code-audit
 
+[![Tests](https://github.com/codesoda/vibe-code-audit/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/codesoda/vibe-code-audit/actions/workflows/tests.yml)
+
 Repo-wide audit skill for "vibe-coded" codebases (parallel feature development, semantic duplication, inconsistent cross-cutting concerns, and architectural drift).
 
 ## Prerequisites
